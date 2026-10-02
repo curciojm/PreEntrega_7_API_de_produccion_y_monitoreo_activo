@@ -5,7 +5,7 @@ from langgraph.graph import MessagesState
 from pydantic import Field, BaseModel
 
 
-
+# Agent
 class AgentState(MessagesState):
 
     """Hereda 'messages' y suma los campos propios del workflow."""
@@ -62,6 +62,15 @@ class ResultadoEvaluacion(BaseModel):
             "Si es Excelente, indicar que no necesita mejoras."
         )
     )
+
+# Redis
+class TaskRequest(BaseModel):
+    query: str
+
+
+class TaskResponse(BaseModel):
+    job_id: str
+    status: str
 
 # Errors
 class LLMErrorType(str, Enum):
