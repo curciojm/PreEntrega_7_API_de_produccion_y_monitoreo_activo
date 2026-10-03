@@ -4,12 +4,14 @@ import uuid
 from fastapi import FastAPI, HTTPException
 from redis import asyncio as aioredis
 
-from app.schemas import TaskRequest, TaskResponse
+from app.schemas import TaskRequest, TaskResponse, ApprovalRequest
 
 
 REDIS_URL = "redis://localhost:6379"
 QUEUE_NAME = "multiagent_tasks"
 STATUS_PREFIX = "task_status:"
+APPROVAL_QUEUE = "multiagent_approvals"
+APPROVAL_PREFIX = "approval_data:"
 
 
 app = FastAPI(
@@ -22,7 +24,7 @@ redis_client = aioredis.from_url(
     decode_responses=True
 )
 
-
+# agrega a la interfaz la opcion esto
 @app.post("/process", response_model=TaskResponse)
 async def create_task(request: TaskRequest):
 
@@ -67,6 +69,49 @@ async def get_status(job_id: str):
 
     return json.loads(data)
 
+@app.post("/approve/{job_id}")
+async def approve_task(
+    job_id: str,
+    request: ApprovalRequest
+):
+
+    key = f"{STATUS_PREFIX}{job_id}"
+
+    data = await redis_client.get(key)
+
+    if not data:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+
+    task_data = json.loads(data)
+
+    if task_data["status"] != "waiting_approval":
+        raise HTTPException(
+            status_code=400,
+            detail="Job is not waiting for approval"
+        )
+
+    approval_data = {
+        "decision": request.decision,
+        "feedback": request.feedback
+    }
+
+    await redis_client.set(
+        f"{APPROVAL_PREFIX}{job_id}",
+        json.dumps(approval_data)
+    )
+
+    await redis_client.rpush(
+        APPROVAL_QUEUE,
+        job_id
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "approval_submitted"
+    }
 # from fastapi import FastAPI
 # import uvicorn
 

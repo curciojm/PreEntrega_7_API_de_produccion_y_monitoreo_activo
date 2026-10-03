@@ -6,13 +6,16 @@ from pydantic import Field, BaseModel
 
 
 # Agent
+
 class AgentState(MessagesState):
 
     """Hereda 'messages' y suma los campos propios del workflow."""
 
     job_id: Optional[str]
-    
+
     approval: Optional[bool]
+
+    feedback_humano: Optional[str]
 
     next_agent: Optional[str]
 
@@ -22,6 +25,11 @@ class AgentState(MessagesState):
 
     task_completed: bool
 
+    revisiones: int
+
+class ApprovalRequest(BaseModel):
+    decision: Literal["approve", "reject"]
+    feedback: str = ""
 
 class DecisionSupervisor(BaseModel):
 

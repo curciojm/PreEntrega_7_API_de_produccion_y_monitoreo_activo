@@ -14,13 +14,13 @@ REDIS_URL = "redis://localhost:6379"
 QUEUE_NAME = "multiagent_tasks"
 STATUS_PREFIX = "task_status:"
 APPROVAL_QUEUE = "multiagent_approvals"
+APPROVAL_PREFIX = "approval_data:"
 
 
 redis_client = aioredis.from_url(
     REDIS_URL,
     decode_responses=True
 )
-
 
 async def procesar_aprobacion(job_id, app):
 
@@ -48,12 +48,27 @@ async def procesar_aprobacion(job_id, app):
     }
 
     try:
+        approval_key = f"{APPROVAL_PREFIX}{job_id}"
+
+        raw_approval = await redis_client.get(
+            approval_key
+        )
+
+        if not raw_approval:
+            print(f"No hay datos de aprobación para {job_id}")
+            return
+
+        approval_data = json.loads(raw_approval)
+
+        decision = approval_data["decision"]
+        feedback = approval_data["feedback"]
+        
 
         resultado = await app.ainvoke(
             Command(resume=True),
             config=config,
         )
-
+        
         traza = serializar_traza(
             resultado["messages"]
         )
@@ -68,6 +83,10 @@ async def procesar_aprobacion(job_id, app):
         task_data["status"] = "completed"
         task_data["result"] = response
         task_data["error"] = None
+
+        await redis_client.delete(
+        approval_key
+        )
 
     except Exception as e:
 

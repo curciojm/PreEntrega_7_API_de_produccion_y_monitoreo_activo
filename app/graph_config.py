@@ -26,7 +26,7 @@ def enrutar_aprobacion(
     if state["approval"]:
         return "evaluador"
 
-    return "sintesis"
+    return "evaluador"
 
 grafo = StateGraph(AgentState)
 
