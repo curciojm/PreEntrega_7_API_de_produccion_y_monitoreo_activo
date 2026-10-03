@@ -11,8 +11,10 @@ from app.trace_utils import serializar_traza, guardar_traza
 
 
 REDIS_URL = "redis://localhost:6379"
+
 QUEUE_NAME = "multiagent_tasks"
 STATUS_PREFIX = "task_status:"
+
 APPROVAL_QUEUE = "multiagent_approvals"
 APPROVAL_PREFIX = "approval_data:"
 
@@ -21,6 +23,7 @@ redis_client = aioredis.from_url(
     REDIS_URL,
     decode_responses=True
 )
+
 
 async def procesar_aprobacion(job_id, app):
 
@@ -40,6 +43,23 @@ async def procesar_aprobacion(job_id, app):
         )
         return
 
+    approval_key = f"{APPROVAL_PREFIX}{job_id}"
+
+    raw_approval = await redis_client.get(
+        approval_key
+    )
+
+    if not raw_approval:
+        print(
+            f"No hay datos de aprobación para {job_id}"
+        )
+        return
+
+    approval_data = json.loads(raw_approval)
+
+    decision = approval_data["decision"]
+    feedback = approval_data["feedback"]
+
     config = {
         "configurable": {
             "thread_id": job_id
@@ -48,44 +68,67 @@ async def procesar_aprobacion(job_id, app):
     }
 
     try:
-        approval_key = f"{APPROVAL_PREFIX}{job_id}"
 
-        raw_approval = await redis_client.get(
-            approval_key
+        print(
+            f"Decisión humana para {job_id}: "
+            f"{decision}"
         )
-
-        if not raw_approval:
-            print(f"No hay datos de aprobación para {job_id}")
-            return
-
-        approval_data = json.loads(raw_approval)
-
-        decision = approval_data["decision"]
-        feedback = approval_data["feedback"]
-        
 
         resultado = await app.ainvoke(
-            Command(resume=True),
+            Command(
+                resume={
+                    "decision": decision,
+                    "feedback": feedback,
+                }
+            ),
             config=config,
         )
-        
-        traza = serializar_traza(
-            resultado["messages"]
-        )
 
-        guardar_traza(
-            traza,
-            job_id
-        )
+        # ------------------------------------------
+        # EL GRAFO VOLVIÓ A INTERRUMPIRSE
+        # ------------------------------------------
 
-        response = resultado["messages"][-1].content
+        if "__interrupt__" in resultado:
 
-        task_data["status"] = "completed"
-        task_data["result"] = response
-        task_data["error"] = None
+            task_data["status"] = "waiting_approval"
+            task_data["result"] = None
+            task_data["error"] = None
 
+            print(
+                f"Job {job_id} vuelve a esperar "
+                "aprobación humana."
+            )
+
+        # ------------------------------------------
+        # EL GRAFO TERMINÓ
+        # ------------------------------------------
+
+        else:
+
+            traza = serializar_traza(
+                resultado["messages"]
+            )
+
+            guardar_traza(
+                traza,
+                job_id
+            )
+
+            response = (
+                resultado["messages"][-1].content
+            )
+
+            task_data["status"] = "completed"
+            task_data["result"] = response
+            task_data["error"] = None
+
+            print(
+                f"Job {job_id} completado."
+            )
+
+        # La decisión ya fue consumida
         await redis_client.delete(
-        approval_key
+            approval_key
         )
 
     except Exception as e:
@@ -94,12 +137,15 @@ async def procesar_aprobacion(job_id, app):
         task_data["result"] = None
         task_data["error"] = str(e)
 
+        print(
+            f"Error procesando aprobación "
+            f"del Job {job_id}: {e}"
+        )
+
     await redis_client.set(
         key,
         json.dumps(task_data)
     )
-
-    print(f"Job {job_id} reanudado y finalizado.")
 
 
 async def main_worker():
@@ -132,7 +178,9 @@ async def main_worker():
 
                 key = f"{STATUS_PREFIX}{job_id}"
 
-                raw_data = await redis_client.get(key)
+                raw_data = await redis_client.get(
+                    key
+                )
 
                 if not raw_data:
                     print(
@@ -177,6 +225,7 @@ async def main_worker():
                         task_data["status"] = (
                             "waiting_approval"
                         )
+
                         task_data["result"] = None
                         task_data["error"] = None
 
@@ -204,6 +253,7 @@ async def main_worker():
                         task_data["status"] = (
                             "completed"
                         )
+
                         task_data["result"] = response
                         task_data["error"] = None
 

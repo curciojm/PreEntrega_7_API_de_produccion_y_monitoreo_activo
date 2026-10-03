@@ -10,10 +10,10 @@ def human_approval(state):
         }
     )
 
-    aprobado = decision["decision"] == "approve"
-
     return {
-        "approval": aprobado,
+        "approval": decision["decision"] == "approve",
         "feedback_humano": decision.get("feedback", ""),
-        "revision_humana": not aprobado,
+        "revisiones": state.get("revisiones", 0) + (
+            1 if decision["decision"] == "reject" else 0
+        )
     }

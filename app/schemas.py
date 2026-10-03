@@ -17,6 +17,8 @@ class AgentState(MessagesState):
 
     feedback_humano: Optional[str]
 
+    revision_humana: bool
+
     next_agent: Optional[str]
 
     contribuciones: Annotated[List[Dict[str, str]], add]

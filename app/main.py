@@ -72,7 +72,7 @@ async def get_status(job_id: str):
 @app.post("/approve/{job_id}")
 async def approve_task(
     job_id: str,
-    request: ApprovalRequest
+    request: ApprovalRequest,
 ):
 
     key = f"{STATUS_PREFIX}{job_id}"
@@ -82,7 +82,7 @@ async def approve_task(
     if not data:
         raise HTTPException(
             status_code=404,
-            detail="Job not found"
+            detail="Job not found",
         )
 
     task_data = json.loads(data)
@@ -90,27 +90,27 @@ async def approve_task(
     if task_data["status"] != "waiting_approval":
         raise HTTPException(
             status_code=400,
-            detail="Job is not waiting for approval"
+            detail="Job is not waiting for approval",
         )
 
     approval_data = {
         "decision": request.decision,
-        "feedback": request.feedback
+        "feedback": request.feedback,
     }
 
     await redis_client.set(
         f"{APPROVAL_PREFIX}{job_id}",
-        json.dumps(approval_data)
+        json.dumps(approval_data),
     )
 
     await redis_client.rpush(
         APPROVAL_QUEUE,
-        job_id
+        job_id,
     )
 
     return {
         "job_id": job_id,
-        "status": "approval_submitted"
+        "status": "approval_submitted",
     }
 # from fastapi import FastAPI
 # import uvicorn

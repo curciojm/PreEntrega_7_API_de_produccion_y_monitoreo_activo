@@ -4,8 +4,6 @@ from app.models import get_model
 from app.schemas import AgentState, DecisionSupervisor
 
 
-
-
 MAX_PASOS = 6
 
 SUPERVISOR_PROMPT = """Sos el Supervisor de un equipo con dos especialistas:
@@ -47,7 +45,10 @@ Contribuciones hasta ahora:
 async def nodo_supervisor(state: AgentState) -> dict:
 
     if state.get("pasos", 0) >= MAX_PASOS:
-        return {"next_agent": "FINISH", "task_completed": True}
+        return {
+            "next_agent": "FINISH",
+            "task_completed": True,
+        }
 
     contribuciones_texto = "\n".join(
         f"- {c['agente']}: {c['aporte'][:500]}"
@@ -61,11 +62,14 @@ async def nodo_supervisor(state: AgentState) -> dict:
     )
 
     messages = [
-    {"role": "system", "content": prompt_sistema},
-    {
-        "role": "user",
-        "content": f"Tarea actual: {pregunta_actual}",
-    },
+        {
+            "role": "system",
+            "content": prompt_sistema,
+        },
+        {
+            "role": "user",
+            "content": f"Tarea actual: {pregunta_actual}",
+        },
     ]
 
     last_error = None

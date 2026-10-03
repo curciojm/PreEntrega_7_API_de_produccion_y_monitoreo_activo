@@ -87,37 +87,10 @@ REGLAS DE USO DE HERRAMIENTAS:
 - No llames a 'buscar_concepto' más de una vez durante la misma ejecución.
 - Utilizá la información obtenida de una herramienta antes de
   realizar otra consulta.
-
-REVISIÓN HUMANA:
-
-Si la tarea contiene una revisión o feedback proporcionado por un supervisor humano:
-
-- Considerá el feedback como información adicional para reconsiderar la evaluación.
-- Volvé a evaluar la respuesta del estudiante utilizando 'evaluar_concepto'.
-- No asumas que la categoría sugerida implícitamente por el feedback es necesariamente correcta.
-- La evaluación final debe ser siempre la categoría devuelta por 'evaluar_concepto'.
-- Utilizá el feedback humano para identificar aspectos de la respuesta que deban revisarse.
 """
 
 async def nodo_evaluador(state: AgentState) -> dict:
-
     tarea = state["messages"][-1].content
-
-    feedback = state.get("feedback_humano")
-
-    if feedback:
-        tarea = f"""
-{tarea}
-
-REVISIÓN HUMANA DE LA EVALUACIÓN ANTERIOR:
-
-Un supervisor humano revisó la evaluación anterior y proporcionó el siguiente feedback:
-
-{feedback}
-
-Debés reconsiderar la respuesta del estudiante teniendo en cuenta este feedback.
-Volvé a utilizar las herramientas disponibles para realizar una nueva evaluación.
-"""
 
     last_error = None
 
@@ -130,20 +103,12 @@ Volvé a utilizar las herramientas disponibles para realizar una nueva evaluaci�
 
             agente_evaluador = create_agent(
                 model=get_model(provider),
-                tools=[
-                    evaluar_concepto,
-                    buscar_fuente,
-                    buscar_concepto,
-                ],
+                tools=[evaluar_concepto, buscar_fuente, buscar_concepto],
                 system_prompt=EVALUADOR_PROMPT,
             )
 
             resultado = await agente_evaluador.ainvoke(
-                {
-                    "messages": [
-                        HumanMessage(content=tarea)
-                    ]
-                }
+                {"messages": [HumanMessage(content=tarea)]}
             )
 
             respuesta = resultado["messages"][-1].content
