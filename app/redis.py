@@ -1,10 +1,9 @@
-import asyncio
 import uuid
 import json
 from fastapi import FastAPI, HTTPException
 from redis import asyncio as aioredis
 from pydantic import BaseModel
-from schemas import TaskResponse, TaskRequest
+from app.schemas import TaskResponse, TaskRequest
 
 # --- CONFIGURACIÓN ---
 REDIS_URL = "redis://localhost:6379"

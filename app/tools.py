@@ -1,11 +1,11 @@
 from langchain_core.tools import tool
 from sklearn.metrics.pairwise import cosine_similarity
 
-from errors import classify_error
-from schemas import ResultadoConcepto, ResultadoFuente, ResultadoEvaluacion
-from logging_config import logger
-from retriever import retriever_hibrido
-from db_config import EMBEDDINGS
+from app.errors import classify_error
+from app.schemas import ResultadoConcepto, ResultadoFuente, ResultadoEvaluacion
+from app.logging_config import logger
+from app.retriever import retriever_hibrido
+from app.db_config import EMBEDDINGS
 
 @tool
 async def buscar_concepto(consulta: str) -> list[ResultadoConcepto]:

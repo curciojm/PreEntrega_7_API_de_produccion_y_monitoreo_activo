@@ -1,11 +1,11 @@
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage, AIMessage
 
-from errors import classify_error
-from logging_config import logger
-from models import get_model
-from schemas import AgentState
-from tools import evaluar_concepto, buscar_concepto, buscar_fuente
+from app.errors import classify_error
+from app.logging_config import logger
+from app.models import get_model
+from app.schemas import AgentState
+from app.tools import evaluar_concepto, buscar_concepto, buscar_fuente
 
 
 EVALUADOR_PROMPT = """

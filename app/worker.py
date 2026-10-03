@@ -1,14 +1,20 @@
+import asyncio
 import json
 
 from redis import asyncio as aioredis
 from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from langgraph.types import Command
 
-from graph_config import grafo
+from app.graph_config import grafo
+from app.trace_utils import serializar_traza, guardar_traza
 
 
 REDIS_URL = "redis://localhost:6379"
 QUEUE_NAME = "multiagent_tasks"
 STATUS_PREFIX = "task_status:"
+APPROVAL_QUEUE = "multiagent_approvals"
+
 
 redis_client = aioredis.from_url(
     REDIS_URL,
@@ -16,165 +22,217 @@ redis_client = aioredis.from_url(
 )
 
 
+async def procesar_aprobacion(job_id, app):
+
+    key = f"{STATUS_PREFIX}{job_id}"
+
+    raw_data = await redis_client.get(key)
+
+    if not raw_data:
+        print(f"Job {job_id} no encontrado.")
+        return
+
+    task_data = json.loads(raw_data)
+
+    if task_data["status"] != "waiting_approval":
+        print(
+            f"Job {job_id} no está esperando aprobación."
+        )
+        return
+
+    config = {
+        "configurable": {
+            "thread_id": job_id
+        },
+        "recursion_limit": 10,
+    }
+
+    try:
+
+        resultado = await app.ainvoke(
+            Command(resume=True),
+            config=config,
+        )
+
+        traza = serializar_traza(
+            resultado["messages"]
+        )
+
+        guardar_traza(
+            traza,
+            job_id
+        )
+
+        response = resultado["messages"][-1].content
+
+        task_data["status"] = "completed"
+        task_data["result"] = response
+        task_data["error"] = None
+
+    except Exception as e:
+
+        task_data["status"] = "failed"
+        task_data["result"] = None
+        task_data["error"] = str(e)
+
+    await redis_client.set(
+        key,
+        json.dumps(task_data)
+    )
+
+    print(f"Job {job_id} reanudado y finalizado.")
+
+
 async def main_worker():
-    """
-    Loop infinito que procesa tareas de la cola de Redis.
-    """
 
     print("Worker iniciado y escuchando...")
 
-    while True:
+    async with AsyncRedisSaver.from_conn_string(
+        REDIS_URL
+    ) as checkpointer:
 
-        # Espera hasta que haya un job en la cola.
-        result = await redis_client.blpop(
-            QUEUE_NAME,
-            timeout=0
+        app = grafo.compile(
+            checkpointer=checkpointer
         )
 
-        if result:
+        while True:
 
-            # Redis devuelve:
-            # [nombre_de_la_cola, job_id]
-            _, job_id = result
+            # ==========================================
+            # 1. JOBS NUEVOS
+            # ==========================================
 
-            print(f"Procesando Job: {job_id}")
-
-            # -------------------------------------------------
-            # 1. Obtener información del job
-            # -------------------------------------------------
-
-            key = f"{STATUS_PREFIX}{job_id}"
-
-            raw_data = await redis_client.get(key)
-
-            if not raw_data:
-                print(f"Job {job_id} no encontrado.")
-                continue
-
-            task_data = json.loads(raw_data)
-
-            # -------------------------------------------------
-            # 2. Marcar como processing
-            # -------------------------------------------------
-
-            task_data["status"] = "processing"
-
-            await redis_client.set(
-                key,
-                json.dumps(task_data)
+            job_id = await redis_client.lpop(
+                QUEUE_NAME
             )
 
-            # -------------------------------------------------
-            # 3. Obtener consulta
-            # -------------------------------------------------
-            # ACA LOS THREADS
-            consulta = task_data["query"]
+            if job_id is not None:
 
-            # Cada job tiene su propio thread_id.
-            config = {
-                "configurable": {
-                    "thread_id": job_id
-                },
-                "recursion_limit": 10,
-            }
-
-            # -------------------------------------------------
-            # 4. Ejecutar LangGraph
-            # -------------------------------------------------
-
-            try:
-                # ACA SE EJECUTA LA CONSULTA
-                resultado = await grafo.ainvoke(
-                    {
-                        "messages": [
-                            HumanMessage(content=consulta)
-                        ]
-                    },
-                    config=config,
+                print(
+                    f"Procesando Job: {job_id}"
                 )
 
-                response = resultado["messages"][-1].content
+                key = f"{STATUS_PREFIX}{job_id}"
 
-                # -------------------------------------------------
-                # 5. Marcar como completed
-                # -------------------------------------------------
+                raw_data = await redis_client.get(key)
 
-                task_data["status"] = "completed"
-                task_data["result"] = response
-                task_data["error"] = None
+                if not raw_data:
+                    print(
+                        f"Job {job_id} no encontrado."
+                    )
+                    continue
 
-            except Exception as e:
+                task_data = json.loads(raw_data)
 
-                # -------------------------------------------------
-                # 6. Si falla, marcar como failed
-                # -------------------------------------------------
+                task_data["status"] = "processing"
 
-                task_data["status"] = "failed"
-                task_data["result"] = None
-                task_data["error"] = str(e)
+                await redis_client.set(
+                    key,
+                    json.dumps(task_data)
+                )
 
-            # -------------------------------------------------
-            # 7. Guardar estado final
-            # -------------------------------------------------
+                consulta = task_data["query"]
 
-            await redis_client.set(
-                key,
-                json.dumps(task_data)
+                config = {
+                    "configurable": {
+                        "thread_id": job_id
+                    },
+                    "recursion_limit": 10,
+                }
+
+                try:
+
+                    resultado = await app.ainvoke(
+                        {
+                            "messages": [
+                                HumanMessage(
+                                    content=consulta
+                                )
+                            ],
+                            "job_id": job_id,
+                        },
+                        config=config,
+                    )
+
+                    if "__interrupt__" in resultado:
+
+                        task_data["status"] = (
+                            "waiting_approval"
+                        )
+                        task_data["result"] = None
+                        task_data["error"] = None
+
+                        print(
+                            f"Job {job_id} "
+                            "esperando aprobación humana."
+                        )
+
+                    else:
+
+                        traza = serializar_traza(
+                            resultado["messages"]
+                        )
+
+                        guardar_traza(
+                            traza,
+                            job_id
+                        )
+
+                        response = (
+                            resultado["messages"][-1]
+                            .content
+                        )
+
+                        task_data["status"] = (
+                            "completed"
+                        )
+                        task_data["result"] = response
+                        task_data["error"] = None
+
+                except Exception as e:
+
+                    task_data["status"] = "failed"
+                    task_data["result"] = None
+                    task_data["error"] = str(e)
+
+                await redis_client.set(
+                    key,
+                    json.dumps(task_data)
+                )
+
+                print(
+                    f"Job {job_id} finalizado."
+                )
+
+                continue
+
+            # ==========================================
+            # 2. APROBACIONES HUMANAS
+            # ==========================================
+
+            approval_job_id = await redis_client.lpop(
+                APPROVAL_QUEUE
             )
 
-            print(f"Job {job_id} finalizado.")
+            if approval_job_id is not None:
+
+                print(
+                    "Procesando aprobación del "
+                    f"Job: {approval_job_id}"
+                )
+
+                await procesar_aprobacion(
+                    approval_job_id,
+                    app
+                )
+
+                continue
+
+            # ==========================================
+            # 3. NADA PARA PROCESAR
+            # ==========================================
+
+            await asyncio.sleep(1)
 
 
 if __name__ == "__main__":
-    import asyncio
-
     asyncio.run(main_worker())
-
-
-## EL FLUJO COMPLETO ES:
-
-# 1. FastAPI
-#    │
-#    │ recibe consulta
-#    ↓
-# 2. Redis
-#    │
-#    ├── guarda:
-#    │     job_id
-#    │     query
-#    │     status = pending
-#    │
-#    └── mete job_id en la cola
-#              │
-#              ↓
-# 3. Worker
-#    │
-#    ├── lee job_id de Redis
-#    │
-#    ├── lee los datos del job
-#    │
-#    ├── cambia status → processing
-#    │
-#    ↓
-# 4. LangGraph
-#    │
-#    │ misma lógica de tu PE6
-#    │
-#    ├── Supervisor
-#    ├── Agente profesor/evaluador
-#    ├── herramientas
-#    ├── Pinecone
-#    └── LLM
-#    │
-#    ↓
-# 5. Worker
-#    │
-#    ├── obtiene resultado
-#    ├── status → completed
-#    ├── guarda result
-#    └── si falla → status = failed
-#    │
-#    ↓
-# 6. Redis
-#    │
-#    └── guarda el estado final

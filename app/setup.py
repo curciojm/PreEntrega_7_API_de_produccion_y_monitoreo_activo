@@ -1,8 +1,8 @@
 from langchain_community.document_loaders import DirectoryLoader, PyPDFLoader
 from langchain_core.documents import Document
 
-from chunking import DocumentProcessor
-from db_config import NAMESPACE
+from app.chunking import DocumentProcessor
+from app.db_config import NAMESPACE
 
 
 def procesamiento_desde_pdfs():

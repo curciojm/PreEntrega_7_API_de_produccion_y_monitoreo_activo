@@ -10,6 +10,10 @@ class AgentState(MessagesState):
 
     """Hereda 'messages' y suma los campos propios del workflow."""
 
+    job_id: Optional[str]
+    
+    approval: Optional[bool]
+
     next_agent: Optional[str]
 
     contribuciones: Annotated[List[Dict[str, str]], add]

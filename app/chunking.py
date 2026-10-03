@@ -5,7 +5,7 @@ import tiktoken
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from logging_config import logger
+from app.logging_config import logger
 
 
 class DocumentProcessor:

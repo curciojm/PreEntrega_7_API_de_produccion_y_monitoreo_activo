@@ -1,4 +1,4 @@
-from schemas import LLMError, LLMErrorType
+from app.schemas import LLMError, LLMErrorType
 
 
 def classify_error(error: Exception) -> LLMError:
