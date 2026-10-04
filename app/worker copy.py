@@ -7,7 +7,6 @@ from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 from langgraph.types import Command
 
 from app.graph_config import grafo
-from app.observability import configurar_observabilidad
 from app.trace_utils import serializar_traza, guardar_traza
 
 
@@ -19,67 +18,15 @@ STATUS_PREFIX = "task_status:"
 APPROVAL_QUEUE = "multiagent_approvals"
 APPROVAL_PREFIX = "approval_data:"
 
-HUMAN_EVENTS_PREFIX = "human_events:"
-
 
 redis_client = aioredis.from_url(
     REDIS_URL,
     decode_responses=True
 )
 
-configurar_observabilidad()
 
-async def guardar_evento_humano(
-    job_id: str,
-    decision: str,
-    feedback: str,
-):
-    """
-    Guarda cada intervención humana en Redis.
+async def procesar_aprobacion(job_id, app):
 
-    Se utiliza una lista para conservar todas las
-    intervenciones realizadas durante el workflow.
-    """
-
-    evento = {
-        "tipo": "HumanApproval",
-        "decision": decision,
-        "feedback": feedback,
-    }
-
-    await redis_client.rpush(
-        f"{HUMAN_EVENTS_PREFIX}{job_id}",
-        json.dumps(
-            evento,
-            ensure_ascii=False
-        ),
-    )
-
-
-async def obtener_eventos_humanos(
-    job_id: str,
-) -> list[dict]:
-    """
-    Recupera todas las intervenciones humanas
-    registradas para el job.
-    """
-
-    raw_events = await redis_client.lrange(
-        f"{HUMAN_EVENTS_PREFIX}{job_id}",
-        0,
-        -1,
-    )
-
-    return [
-        json.loads(evento)
-        for evento in raw_events
-    ]
-
-
-async def procesar_aprobacion(
-    job_id,
-    app,
-):
     key = f"{STATUS_PREFIX}{job_id}"
 
     raw_data = await redis_client.get(key)
@@ -113,37 +60,25 @@ async def procesar_aprobacion(
     decision = approval_data["decision"]
     feedback = approval_data["feedback"]
 
+    evento_humano = {
+        "tipo": "HumanApproval",
+        "decision": decision,
+        "feedback": feedback,
+    }
+
+    config = {
+        "configurable": {
+            "thread_id": job_id
+        },
+        "recursion_limit": 10,
+    }
+
     try:
 
         print(
             f"Decisión humana para {job_id}: "
             f"{decision}"
         )
-
-        # --------------------------------------------------
-        # GUARDAR INTERVENCIÓN HUMANA
-        # --------------------------------------------------
-
-        await guardar_evento_humano(
-            job_id=job_id,
-            decision=decision,
-            feedback=feedback,
-        )
-
-        # --------------------------------------------------
-        # CONFIGURACIÓN DEL CHECKPOINT
-        # --------------------------------------------------
-
-        config = {
-            "configurable": {
-                "thread_id": job_id
-            },
-            "recursion_limit": 10,
-        }
-
-        # --------------------------------------------------
-        # REANUDAR EL GRAFO
-        # --------------------------------------------------
 
         resultado = await app.ainvoke(
             Command(
@@ -154,10 +89,10 @@ async def procesar_aprobacion(
             ),
             config=config,
         )
-
-        # --------------------------------------------------
+        
+        # ------------------------------------------
         # EL GRAFO VOLVIÓ A INTERRUMPIRSE
-        # --------------------------------------------------
+        # ------------------------------------------
 
         if "__interrupt__" in resultado:
 
@@ -170,25 +105,15 @@ async def procesar_aprobacion(
                 "aprobación humana."
             )
 
-        # --------------------------------------------------
+        # ------------------------------------------
         # EL GRAFO TERMINÓ
-        # --------------------------------------------------
+        # ------------------------------------------
 
         else:
 
-            # Recuperamos todas las intervenciones humanas
-            eventos_humanos = await obtener_eventos_humanos(
-                job_id
-            )
-
-            # Construimos la traza del grafo
             traza = serializar_traza(
                 resultado["messages"]
             )
-
-            # Agregamos las intervenciones humanas
-            # como eventos de la traza
-            traza.extend(eventos_humanos)
 
             guardar_traza(
                 traza,
@@ -207,13 +132,7 @@ async def procesar_aprobacion(
                 f"Job {job_id} completado."
             )
 
-            # La traza ya quedó guardada.
-            # Podemos eliminar los eventos temporales.
-            await redis_client.delete(
-                f"{HUMAN_EVENTS_PREFIX}{job_id}"
-            )
-
-        # Ya procesamos esta aprobación
+        # La decisión ya fue consumida
         await redis_client.delete(
             approval_key
         )
@@ -237,9 +156,7 @@ async def procesar_aprobacion(
 
 async def main_worker():
 
-    print(
-        "Worker iniciado y escuchando..."
-    )
+    print("Worker iniciado y escuchando...")
 
     async with AsyncRedisSaver.from_conn_string(
         REDIS_URL
@@ -251,9 +168,9 @@ async def main_worker():
 
         while True:
 
-            # ==================================================
-            # COLA PRINCIPAL DE TAREAS
-            # ==================================================
+            # ==========================================
+            # 1. JOBS NUEVOS
+            # ==========================================
 
             job_id = await redis_client.lpop(
                 QUEUE_NAME
@@ -272,11 +189,9 @@ async def main_worker():
                 )
 
                 if not raw_data:
-
                     print(
                         f"Job {job_id} no encontrado."
                     )
-
                     continue
 
                 task_data = json.loads(raw_data)
@@ -311,10 +226,6 @@ async def main_worker():
                         config=config,
                     )
 
-                    # ==========================================
-                    # EL GRAFO SE INTERRUMPIÓ
-                    # ==========================================
-
                     if "__interrupt__" in resultado:
 
                         task_data["status"] = (
@@ -328,10 +239,6 @@ async def main_worker():
                             f"Job {job_id} "
                             "esperando aprobación humana."
                         )
-
-                    # ==========================================
-                    # EL GRAFO TERMINÓ
-                    # ==========================================
 
                     else:
 
@@ -373,9 +280,9 @@ async def main_worker():
 
                 continue
 
-            # ==================================================
-            # COLA DE APROBACIONES HUMANAS
-            # ==================================================
+            # ==========================================
+            # 2. APROBACIONES HUMANAS
+            # ==========================================
 
             approval_job_id = await redis_client.lpop(
                 APPROVAL_QUEUE
@@ -395,9 +302,9 @@ async def main_worker():
 
                 continue
 
-            # ==================================================
-            # NO HAY TRABAJO
-            # ==================================================
+            # ==========================================
+            # 3. NADA PARA PROCESAR
+            # ==========================================
 
             await asyncio.sleep(1)
 
