@@ -27,7 +27,9 @@ redis_client = aioredis.from_url(
     decode_responses=True
 )
 
+print(">>> CONFIGURANDO PHOENIX")
 configurar_observabilidad()
+print(">>> PHOENIX CONFIGURADO")
 
 async def guardar_evento_humano(
     job_id: str,
