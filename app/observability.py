@@ -1,5 +1,5 @@
-from phoenix.otel import register
 from openinference.instrumentation.langchain import LangChainInstrumentor
+from phoenix.otel import register
 
 
 def configurar_observabilidad():

@@ -2,6 +2,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
+
 def get_model(provider: str):
 
     if provider == "openai":

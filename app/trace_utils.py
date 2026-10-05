@@ -19,7 +19,6 @@ def extraer_texto(mensaje) -> str:
 
     return str(contenido)
 
-
 def serializar_traza(mensajes) -> list[dict]:
     """Convierte los mensajes de LangGraph a un formato JSON simple."""
     traza = []
@@ -48,7 +47,6 @@ def serializar_traza(mensajes) -> list[dict]:
         traza.append(entrada)
 
     return traza
-
 
 def guardar_traza(traza: list[dict], thread_id: str) -> None:
     """Guarda la traza ReAct de una conversación en formato JSON."""

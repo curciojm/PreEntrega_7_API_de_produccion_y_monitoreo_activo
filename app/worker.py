@@ -1,14 +1,14 @@
 import asyncio
 import json
 
-from redis import asyncio as aioredis
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 from langgraph.types import Command
+from redis import asyncio as aioredis
 
 from app.graph_config import grafo
 from app.observability import configurar_observabilidad
-from app.trace_utils import serializar_traza, guardar_traza
+from app.trace_utils import guardar_traza, serializar_traza
 
 
 REDIS_URL = "redis://localhost:6379"
@@ -77,7 +77,6 @@ async def obtener_eventos_humanos(
         for evento in raw_events
     ]
 
-
 async def procesar_aprobacion(
     job_id,
     app,
@@ -122,19 +121,11 @@ async def procesar_aprobacion(
             f"{decision}"
         )
 
-        # --------------------------------------------------
-        # GUARDAR INTERVENCIÓN HUMANA
-        # --------------------------------------------------
-
         await guardar_evento_humano(
             job_id=job_id,
             decision=decision,
             feedback=feedback,
         )
-
-        # --------------------------------------------------
-        # CONFIGURACIÓN DEL CHECKPOINT
-        # --------------------------------------------------
 
         config = {
             "configurable": {
@@ -142,10 +133,6 @@ async def procesar_aprobacion(
             },
             "recursion_limit": 10,
         }
-
-        # --------------------------------------------------
-        # REANUDAR EL GRAFO
-        # --------------------------------------------------
 
         resultado = await app.ainvoke(
             Command(
@@ -156,10 +143,6 @@ async def procesar_aprobacion(
             ),
             config=config,
         )
-
-        # --------------------------------------------------
-        # EL GRAFO VOLVIÓ A INTERRUMPIRSE
-        # --------------------------------------------------
 
         if "__interrupt__" in resultado:
 
@@ -172,9 +155,6 @@ async def procesar_aprobacion(
                 "aprobación humana."
             )
 
-        # --------------------------------------------------
-        # EL GRAFO TERMINÓ
-        # --------------------------------------------------
 
         else:
 
@@ -209,13 +189,10 @@ async def procesar_aprobacion(
                 f"Job {job_id} completado."
             )
 
-            # La traza ya quedó guardada.
-            # Podemos eliminar los eventos temporales.
             await redis_client.delete(
                 f"{HUMAN_EVENTS_PREFIX}{job_id}"
             )
 
-        # Ya procesamos esta aprobación
         await redis_client.delete(
             approval_key
         )
@@ -252,10 +229,6 @@ async def main_worker():
         )
 
         while True:
-
-            # ==================================================
-            # COLA PRINCIPAL DE TAREAS
-            # ==================================================
 
             job_id = await redis_client.lpop(
                 QUEUE_NAME
@@ -313,10 +286,6 @@ async def main_worker():
                         config=config,
                     )
 
-                    # ==========================================
-                    # EL GRAFO SE INTERRUMPIÓ
-                    # ==========================================
-
                     if "__interrupt__" in resultado:
 
                         task_data["status"] = (
@@ -331,9 +300,6 @@ async def main_worker():
                             "esperando aprobación humana."
                         )
 
-                    # ==========================================
-                    # EL GRAFO TERMINÓ
-                    # ==========================================
 
                     else:
 
@@ -375,9 +341,6 @@ async def main_worker():
 
                 continue
 
-            # ==================================================
-            # COLA DE APROBACIONES HUMANAS
-            # ==================================================
 
             approval_job_id = await redis_client.lpop(
                 APPROVAL_QUEUE
@@ -396,10 +359,6 @@ async def main_worker():
                 )
 
                 continue
-
-            # ==================================================
-            # NO HAY TRABAJO
-            # ==================================================
 
             await asyncio.sleep(1)
 

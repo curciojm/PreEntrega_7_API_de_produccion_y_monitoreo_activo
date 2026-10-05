@@ -24,7 +24,6 @@ redis_client = aioredis.from_url(
     decode_responses=True
 )
 
-# agrega a la interfaz la opcion esto
 @app.post("/process", response_model=TaskResponse)
 async def create_task(request: TaskRequest):
 
@@ -52,7 +51,6 @@ async def create_task(request: TaskRequest):
         job_id=job_id,
         status="pending"
     )
-
 
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
@@ -112,17 +110,3 @@ async def approve_task(
         "job_id": job_id,
         "status": "approval_submitted",
     }
-# from fastapi import FastAPI
-# import uvicorn
-
-# app = FastAPI(title="PreEntrega 7 - Multi-Agent API")
-
-# # ... tus endpoints ...
-
-
-# if __name__ == "__main__":
-#     uvicorn.run(
-#         app,
-#         host="0.0.0.0",
-#         port=8000
-#     )

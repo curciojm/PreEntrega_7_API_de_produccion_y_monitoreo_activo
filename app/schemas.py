@@ -63,7 +63,6 @@ class ResultadoFuente(BaseModel):
         description="Número entero de página donde aparece la información."
     )
 
-
 class ResultadoEvaluacion(BaseModel):
 
     evaluacion: Literal["Mal", "Incompleta", "Bien", "Muy bien"] = Field(
