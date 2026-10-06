@@ -158,18 +158,14 @@ async def procesar_aprobacion(
 
         else:
 
-            # Recuperamos todas las intervenciones humanas
             eventos_humanos = await obtener_eventos_humanos(
                 job_id
             )
 
-            # Construimos la traza del grafo
             traza = serializar_traza(
                 resultado["messages"]
             )
 
-            # Agregamos las intervenciones humanas
-            # como eventos de la traza
             traza.extend(eventos_humanos)
 
             guardar_traza(

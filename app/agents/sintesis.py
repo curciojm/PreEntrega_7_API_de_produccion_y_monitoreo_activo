@@ -6,8 +6,6 @@ from app.models import get_model
 from app.schemas import AgentState
 
 
-
-
 async def nodo_sintesis(state: AgentState) -> dict:
 
     contribuciones_texto = "\n".join(

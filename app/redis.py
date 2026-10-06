@@ -43,7 +43,6 @@ async def get_status(job_id: str):
     """
     Consulta el estado actual de una tarea en Redis.
     """
-    # Toma el status prefix
     data = await redis_client.get(f"{STATUS_PREFIX}{job_id}")
 
     if not data:
