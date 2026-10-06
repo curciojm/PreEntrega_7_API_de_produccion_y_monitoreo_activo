@@ -1,94 +1,426 @@
-# Orquestador multi-agente especializado (Pre-Entrega 6)
+# API de producción y monitoreo activo (Pre-Entrega 7)
 
-Proyecto correspondiente a la Pre-Entrega 6 del curso de AI Engineering.
+Este proyecto corresponde a la **Pre-Entrega 7 del curso de AI Engineering**.
 
-Link video de explicación del flujo de delegación: https://drive.google.com/file/d/15ePyc9Lz4mw-cTuv-E_9P9wg6nIHz9XC/view?usp=drive_link
+La entrega consiste en exponer mediante una API REST asíncrona el sistema multi-agente desarrollado en la Pre-Entrega 6, incorporando una arquitectura orientada a producción mediante **FastAPI + Redis + Worker + LangGraph**, persistencia del estado y checkpoints, observabilidad con **Arize Phoenix**, métricas de costo y latencia, y un flujo de **Human-in-the-loop (HITL)**.
+
+**Link video de explicación del flujo de ejecución y Human-in-the-loop:**  
+[Video de explicación](https://drive.google.com/file/d/1vc6fj9Q3QblrYEaXFmkpFuMy8TkhwZRh/view?usp=drive_link)
+
+---
 
 ## Descripción
 
-Orquestador multi-agente especializado implementado con LangGraph y LangChain, utilizando un Supervisor y dos agentes especialistas para resolver consultas relacionadas con metodología de la investigación y estadística.
+La aplicación expone una **API REST asíncrona** que permite enviar tareas al sistema multi-agente sin bloquear la solicitud HTTP mientras se ejecuta el procesamiento.
 
-El sistema implementa una arquitectura jerárquica en la que un Supervisor analiza la tarea del usuario y decide qué agente especializado debe intervenir:
+La arquitectura separa la recepción de solicitudes de la ejecución del sistema multi-agente:
 
-* **Agente de Búsqueda/Investigación (`agente_profesor`)**: busca información conceptual y fuentes dentro de la base documental mediante recuperación híbrida.
-* **Agente de Análisis/Cómputo (`agente_evaluador`)**: analiza respuestas proporcionadas por el usuario y calcula una medida de similitud semántica entre la respuesta conceptual ingresada por el usuario y los documentos recuperados para clasificar el nivel de conocimiento demostrado.
+```text
+Cliente
+   │
+   │ POST /process
+   ▼
+FastAPI
+   │
+   │ job_id
+   ▼
+Redis Queue
+   │
+   ▼
+Worker
+   │
+   ▼
+LangGraph
+   │
+   ├── Supervisor
+   │      ├── Profesor
+   │      └── Evaluador
+   │
+   ├── Human-in-the-loop
+   │
+   └── Síntesis
+```
 
-Los agentes utilizan herramientas especializadas y comparten un estado estructurado mediante `AgentState`.
+De esta manera, el endpoint HTTP recibe la tarea, genera un identificador y la coloca en una cola de Redis. El procesamiento pesado queda a cargo de un Worker independiente.
 
-El sistema permite:
+La aplicación utiliza:
 
-* Recibir consultas en lenguaje natural.
-* Determinar qué agente especializado debe intervenir según la tarea.
-* Utilizar un Supervisor para coordinar la ejecución.
-* Buscar conceptos y explicaciones en documentos académicos.
-* Buscar fuentes y páginas relacionadas con un tema.
-* Evaluar respuestas proporcionadas por el usuario.
-* Calcular similitud semántica mediante embeddings y similitud del coseno.
-* Clasificar las respuestas en las categorías `Mal`, `Incompleta`, `Bien` y `Muy bien`.
-* Utilizar un retriever híbrido basado en BM25 y búsqueda vectorial.
-* Mantener un estado compartido entre los diferentes nodos del grafo.
-* Persistir el estado de las conversaciones mediante SQLite y `thread_id`.
-* Limitar el número máximo de pasos del Supervisor.
-* Utilizar diferentes proveedores LLM mediante un mecanismo de fallback.
-* Generar una respuesta final mediante un nodo de síntesis.
-* Registrar eventos relevantes mediante `logging`.
-* Generar trazas de ejecución en formato JSON.
-* Clasificar errores provenientes de los proveedores LLM y de las herramientas.
-* Ejecutar operaciones de manera asíncrona.
-* Ejecutar pruebas automatizadas mediante `pytest` y `pytest-asyncio`.
-* Ejecutar los tests automáticamente mediante GitHub Actions.
+- **FastAPI** para la API REST.
+- **Redis** para la cola de tareas y la persistencia del estado.
+- **LangGraph** para la orquestación del sistema multi-agente.
+- **Redis Checkpointer** para persistir el estado del grafo.
+- **Worker asíncrono** para ejecutar las tareas fuera del contexto de la solicitud HTTP.
+- **Human-in-the-loop** mediante `interrupt()` y `Command(resume=...)`.
+- **Arize Phoenix + OpenInference** para observabilidad.
+- **Trazas JSON** para conservar el detalle de las ejecuciones.
+- Manejo de errores de ejecución y actualización del estado de las tareas a `FAILED`.
 
-## Correspondencia con la consigna
+---
 
-La arquitectura implementada corresponde a los componentes solicitados en la consigna de la siguiente manera:
+## Correspondencia entre requisitos y componentes
 
-| Requisito de la consigna         | Implementación                            |
-| -------------------------------- | ----------------------------------------- |
-| Supervisor                       | `agents/supervisor.py`                    |
-| Agente de Búsqueda/Investigación | `agents/profesor.py`                      |
-| Agente de Análisis/Cómputo       | `agents/evaluador.py`                     |
-| Estado compartido estructurado   | `AgentState` en `schemas.py`              |
-| Herramientas funcionales         | `tools.py`                                |
-| Orquestación mediante grafo      | `graph_config.py`                         |
-| Validación de resultados         | Decisión del Supervisor antes de `FINISH` |
-| Memoria/persistencia             | `AsyncSqliteSaver`                        |
-| Síntesis de resultados           | `agents/sintesis.py`                      |
-| Pruebas automatizadas            | `tests/`                                  |
-| Evidencia de ejecución           | `traces/`                                 |
+| Requisito | Implementación |
+|---|---|
+| API REST asíncrona | `app/main.py` |
+| Crear tarea | `POST /process` |
+| Consultar estado | `GET /status/{job_id}` |
+| Aprobación humana | `POST /approve/{job_id}` |
+| Cola principal | Redis `multiagent_tasks` |
+| Cola de aprobaciones | Redis `multiagent_approvals` |
+| Estado de tareas | Redis `task_status:{job_id}` |
+| Worker | `app/worker.py` |
+| Grafo multi-agente | `app/graph_config.py` |
+| Checkpoints | `AsyncRedisSaver` |
+| Human-in-the-loop | `app/hitl.py` |
+| Observabilidad | `app/observability.py` |
+| Instrumentación | OpenInference + Phoenix |
+| Trazas detalladas | `traces/` |
+| Evidencia de observabilidad | `screenshots/` |
+| Manejo de errores | `app/errors.py` |
+| Modelos y estado | `app/schemas.py` |
+| Serialización de trazas | `app/trace_utils.py` |
 
-### Agente de Búsqueda/Investigación
+---
 
-El requisito de **Agente de Búsqueda/Investigación** se implementa mediante `agente_profesor`.
+# Arquitectura
 
-Este agente está especializado en consultas conceptuales y utiliza las herramientas:
+El flujo general comienza cuando el cliente realiza un `POST /process`.
 
-* `buscar_concepto`: recupera contenido relevante de los documentos disponibles.
-* `buscar_fuente`: recupera las fuentes y páginas relacionadas con un tema.
+```text
+Usuario
+   │
+   ▼
+POST /process
+   │
+   ▼
+FastAPI
+   │
+   ├── genera job_id
+   ├── guarda estado inicial en Redis
+   └── agrega job_id a multiagent_tasks
+              │
+              ▼
+         Redis Queue
+              │
+              ▼
+            Worker
+              │
+              ▼
+          LangGraph
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+  Supervisor      Supervisor
+       │             │
+   Profesor       Evaluador
+       │             │
+       └──────┬──────┘
+              ▼
+           Síntesis
+              │
+              ▼
+             DONE
+```
 
-El agente utiliza un retriever híbrido que combina recuperación mediante BM25 y búsqueda vectorial.
+El endpoint no permanece esperando a que termine el procesamiento multi-agente. Devuelve inmediatamente el `job_id`, que posteriormente puede utilizarse para consultar el estado de la tarea.
 
-### Agente de Análisis/Cómputo
+---
 
-El requisito de **Agente de Análisis/Cómputo** se implementa mediante `agente_evaluador`.
+## Flujo Human-in-the-loop
 
-Este agente analiza las respuestas proporcionadas por el usuario. Su herramienta principal, `evaluar_concepto`, recupera documentos relacionados con el tema, genera embeddings para la respuesta del usuario y para los documentos recuperados y calcula la similitud semántica mediante similitud del coseno.
+Cuando el Supervisor determina que debe utilizarse el agente evaluador, el flujo pasa previamente por el nodo de aprobación humana.
 
-A partir del valor obtenido se clasifica la respuesta en cuatro categorías:
+```text
+Supervisor
+    │
+    ▼
+Human Approval
+    │
+    ▼
+interrupt()
+    │
+    ▼
+WAITING_APPROVAL
+    │
+    │ POST /approve/{job_id}
+    ▼
+Redis
+    │
+    ▼
+Worker
+    │
+    ▼
+Command(resume=...)
+    │
+    ▼
+Evaluador
+    │
+    ├── revisión necesaria ──► Human Approval
+    │
+    └── evaluación final ───► Supervisor
+                                  │
+                                  ▼
+                               Síntesis
+                                  │
+                                  ▼
+                                 DONE
+```
 
-* `Mal`
-* `Incompleta`
-* `Bien`
-* `Muy bien`
+El flujo utiliza `interrupt()` para pausar la ejecución del grafo y `Command(resume=...)` para continuarla una vez recibida la decisión humana.
 
-Además, el agente puede utilizar `buscar_fuente` y `buscar_concepto` para proporcionar información que permita al estudiante comprender y mejorar su respuesta.
+La intervención humana puede:
 
-Los umbrales utilizados son heurísticos y no pretenden representar una escala empíricamente calibrada.
+- **Aprobar** la evaluación y continuar el flujo.
+- **Rechazar** la evaluación proporcionando feedback para que el evaluador vuelva a analizar la respuesta.
 
-### Supervisor
+El feedback humano se incorpora a la siguiente evaluación y se persiste junto con los demás eventos de intervención.
 
-El requisito de orquestación jerárquica se implementa mediante `nodo_supervisor`.
+---
 
-El Supervisor utiliza una salida estructurada mediante `DecisionSupervisor`, que restringe sus decisiones a:
+# API
+
+## `POST /process`
+
+Recibe una consulta y crea una nueva tarea.
+
+El endpoint:
+
+1. Genera un `job_id`.
+2. Guarda el estado inicial en Redis.
+3. Agrega el `job_id` a la cola `multiagent_tasks`.
+4. Devuelve inmediatamente el identificador de la tarea.
+
+Ejemplo conceptual:
+
+```json
+{
+    "query": "Quiero que evalúes mi respuesta sobre la media..."
+}
+```
+
+Respuesta:
+
+```json
+{
+    "job_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "status": "pending"
+}
+```
+
+---
+
+## `GET /status/{job_id}`
+
+Permite consultar el estado de una tarea.
+
+Los principales estados utilizados son:
+
+```text
+pending
+running
+waiting_approval
+done
+failed
+```
+
+El estado se almacena en Redis mediante la clave:
+
+```text
+task_status:{job_id}
+```
+
+Además del estado, se conserva información sobre la consulta, resultado y posibles errores.
+
+---
+
+## `POST /approve/{job_id}`
+
+Permite responder a una solicitud de aprobación humana.
+
+Ejemplo de aprobación:
+
+```json
+{
+    "decision": "approve",
+    "feedback": ""
+}
+```
+
+Ejemplo de rechazo:
+
+```json
+{
+    "decision": "reject",
+    "feedback": "Revisá la explicación y agregá un ejemplo aplicado a una investigación psicológica."
+}
+```
+
+El endpoint no reanuda directamente el grafo. Guarda la decisión en Redis y la coloca en la cola `multiagent_approvals`.
+
+El Worker recupera posteriormente la aprobación y continúa la ejecución de LangGraph.
+
+---
+
+# Procesamiento asíncrono
+
+La separación entre FastAPI y Worker permite desacoplar la recepción de las solicitudes de la ejecución del sistema multi-agente.
+
+El flujo es:
+
+```text
+POST /process
+      │
+      ▼
+Redis
+      │
+      ▼
+multiagent_tasks
+      │
+      ▼
+Worker
+      │
+      ▼
+LangGraph
+```
+
+FastAPI funciona como productor de tareas y el Worker como consumidor.
+
+La cola principal utiliza:
+
+```python
+RPUSH
+LPOP
+```
+
+De esta forma, el endpoint HTTP no queda bloqueado esperando la finalización de los agentes.
+
+---
+
+# Redis
+
+Redis cumple varias funciones dentro de la aplicación.
+
+## Estado de las tareas
+
+Cada tarea utiliza una clave:
+
+```text
+task_status:{job_id}
+```
+
+El estado contiene información como:
+
+```json
+{
+    "job_id": "...",
+    "query": "...",
+    "status": "running",
+    "result": null,
+    "error": null
+}
+```
+
+Si ocurre una excepción durante la ejecución en segundo plano, el Worker actualiza el estado de la tarea a:
+
+```text
+failed
+```
+
+Esto evita que una tarea quede indefinidamente en estado `running`.
+
+## Colas
+
+Se utilizan dos colas principales:
+
+```text
+multiagent_tasks
+multiagent_approvals
+```
+
+La primera contiene las tareas nuevas y la segunda las decisiones de aprobación humana.
+
+## Checkpoints
+
+El grafo de LangGraph se compila utilizando `AsyncRedisSaver`:
+
+```python
+async with AsyncRedisSaver.from_conn_string(REDIS_URL) as checkpointer:
+    app = grafo.compile(checkpointer=checkpointer)
+```
+
+Esto permite persistir el estado del grafo y continuar la ejecución después de una interrupción provocada por el flujo HITL.
+
+---
+
+# Worker
+
+El Worker es responsable de consumir las tareas de Redis y ejecutar el sistema multi-agente.
+
+El flujo general es:
+
+```text
+Redis Queue
+    │
+    ▼
+Worker
+    │
+    ├── status = RUNNING
+    │
+    ▼
+LangGraph
+    │
+    ├── WAITING_APPROVAL
+    │
+    └── DONE
+```
+
+Si ocurre una excepción durante el procesamiento:
+
+```text
+Exception
+    │
+    ▼
+status = FAILED
+```
+
+Los errores quedan registrados y pueden consultarse mediante el endpoint de estado.
+
+---
+
+# Sistema multi-agente
+
+El sistema mantiene la arquitectura desarrollada en la Pre-Entrega 6.
+
+Está compuesto por:
+
+- `agente_profesor`
+- `agente_evaluador`
+- `nodo_supervisor`
+- `nodo_sintesis`
+
+El estado compartido se define mediante `AgentState`.
+
+El Supervisor decide qué especialista debe intervenir:
+
+```text
+Supervisor
+    │
+    ├── profesor
+    │
+    ├── evaluador
+    │
+    └── FINISH
+```
+
+Cuando corresponde finalizar, el flujo pasa al nodo de síntesis.
+
+---
+
+# Supervisor
+
+El Supervisor utiliza un modelo LLM con salida estructurada mediante `DecisionSupervisor`.
+
+Las opciones posibles son:
 
 ```text
 profesor
@@ -96,576 +428,605 @@ evaluador
 FINISH
 ```
 
-El Supervisor determina qué especialista debe intervenir y, después de recibir su aporte, vuelve a evaluar si la tarea está suficientemente resuelta.
+El Supervisor analiza la consulta y las contribuciones acumuladas para determinar qué agente debe intervenir.
 
-Si el aporte del especialista es suficiente, selecciona `FINISH`. En ese caso, el grafo continúa hacia el nodo de síntesis.
+También se utiliza un límite máximo de pasos:
 
-También se establece un límite máximo de pasos mediante `MAX_PASOS` para evitar ciclos indefinidos.
+```python
+MAX_PASOS = 6
+```
 
-## Requisitos
+Esto permite evitar ciclos excesivos en el grafo.
 
-### Mínimos
+El sistema utiliza fallback entre proveedores LLM:
 
-* Python 3.12+ según la especificación de la consigna.
-* API key de Google Gemini.
-* API key de Pinecone.
-* Un índice de Pinecone configurado para almacenar los embeddings de los documentos.
+```text
+OpenAI
+   ↓
+Anthropic
+   ↓
+Gemini
+```
 
-### Extras
+Si un proveedor falla, se intenta continuar con el siguiente.
 
-* API key de OpenAI.
-* API key de Anthropic.
+---
 
-Los proveedores OpenAI y Anthropic se encuentran contemplados como alternativas dentro del mecanismo de fallback.
+# Human-in-the-loop
 
-### Versión de Python utilizada
+La aprobación humana se implementa mediante el mecanismo de interrupción de LangGraph.
 
-Si bien la consigna especifica Python 3.12+, durante el desarrollo de esta entrega se utilizó Python 3.11.x debido a incompatibilidades de dependencias identificadas durante la entrega anterior.
+El nodo utiliza:
 
-La versión 3.11 se mantuvo con el objetivo de facilitar la ejecución del proyecto en el entorno de evaluación y mantener la compatibilidad del conjunto de dependencias utilizado.
+```python
+interrupt(...)
+```
 
-El entorno de CI de GitHub Actions utiliza la misma versión para reproducir el entorno utilizado durante el desarrollo y ejecutar los tests.
+Cuando se ejecuta, el grafo queda pausado y la tarea pasa a:
 
-## Entorno virtual
+```text
+waiting_approval
+```
 
-El proyecto utiliza un entorno virtual de Python mediante `venv`.
+Posteriormente, el endpoint:
 
-### Crear el entorno virtual
+```text
+POST /approve/{job_id}
+```
+
+recibe la decisión humana.
+
+El Worker recupera la decisión y utiliza:
+
+```python
+Command(
+    resume={
+        "decision": decision,
+        "feedback": feedback,
+    }
+)
+```
+
+para continuar la ejecución.
+
+## Rechazo y reevaluación
+
+Cuando el usuario rechaza la evaluación, el feedback se incorpora a la siguiente ejecución del evaluador.
+
+Por ejemplo:
+
+```text
+"Revisá la explicación y aclarale que la media no necesariamente
+coincide con el valor central de los datos ordenados. Agregá un
+ejemplo aplicado a una investigación psicológica con participantes humanos."
+```
+
+El evaluador vuelve a utilizar sus herramientas y realiza una nueva evaluación considerando la revisión humana.
+
+Si la evaluación vuelve a requerir intervención, el grafo puede regresar nuevamente a `human_approval`.
+
+---
+
+# Persistencia de las intervenciones humanas
+
+Las decisiones humanas se almacenan temporalmente en Redis mediante:
+
+```text
+human_events:{job_id}
+```
+
+Cada evento contiene información como:
+
+```json
+{
+    "tipo": "HumanApproval",
+    "decision": "reject",
+    "feedback": "..."
+}
+```
+
+Al finalizar la tarea, estos eventos se incorporan a la traza JSON correspondiente.
+
+De esta manera, la intervención humana forma parte del registro de ejecución de la tarea.
+
+---
+
+# Observabilidad
+
+La aplicación utiliza **Arize Phoenix** junto con **OpenInference** para instrumentar el sistema.
+
+La instrumentación se configura mediante:
+
+```python
+LangChainInstrumentor().instrument(
+    tracer_provider=tracer_provider
+)
+```
+
+Phoenix recibe las trazas mediante:
+
+```text
+http://localhost:6006/v1/traces
+```
+
+y la interfaz web está disponible en:
+
+```text
+http://localhost:6006
+```
+
+Las capturas almacenadas en `screenshots/` muestran la observabilidad de las ejecuciones, incluyendo:
+
+- trazas;
+- spans;
+- secuencia de ejecución;
+- componentes involucrados;
+- latencia;
+- costo;
+- ejecución concurrente;
+- flujo Human-in-the-loop.
+
+Las trazas detalladas se conservan adicionalmente en formato JSON dentro de `traces/`.
+
+---
+
+# Trazas detalladas
+
+Cada ejecución genera una traza JSON con información sobre el flujo observable de la aplicación.
+
+Las trazas pueden contener:
+
+- mensajes del usuario;
+- respuestas de los agentes;
+- llamadas a herramientas;
+- resultados de herramientas;
+- agentes involucrados;
+- decisiones del workflow;
+- intervenciones humanas;
+- eventos de aprobación;
+- feedback humano.
+
+Las trazas representan la **ejecución observable del sistema**, no el razonamiento interno no observable de los modelos.
+
+Una ejecución con Human-in-the-loop puede generar diferentes etapas observables debido al mecanismo de `interrupt()` y `resume()`:
+
+```text
+Ejecución inicial
+      │
+      ▼
+Evaluador
+      │
+      ▼
+Human Approval
+      │
+      ▼
+interrupt()
+      │
+      ▼
+Resume con feedback
+      │
+      ▼
+Nueva evaluación
+      │
+      ▼
+Human Approval
+      │
+      ▼
+interrupt()
+      │
+      ▼
+Resume con aprobación
+      │
+      ▼
+Síntesis
+      │
+      ▼
+DONE
+```
+
+---
+
+# Prueba con cinco solicitudes concurrentes
+
+Se realizaron cinco solicitudes concurrentes mediante `POST /process`.
+
+Cada solicitud recibió un `job_id` independiente y fue procesada mediante la cola de Redis y el Worker.
+
+La corrida se utilizó como base para obtener las métricas de:
+
+- costo por ejecución;
+- costo de tokens de entrada y salida;
+- latencia;
+- p95 de latencia.
+
+Las capturas correspondientes se encuentran en:
+
+```text
+screenshots/
+```
+
+Las cinco ejecuciones también cuentan con sus respectivas trazas detalladas en:
+
+```text
+traces/
+```
+
+---
+
+# Costo por ejecución
+
+El costo se calculó a partir de los tokens de entrada y salida registrados durante las ejecuciones.
+
+La evidencia de la corrida concurrente se encuentra en:
+
+```text
+screenshots/trace_plot_cost.png
+```
+
+La captura permite comparar el costo correspondiente a las cinco ejecuciones solicitadas.
+
+### Trazas de mayor costo
+
+Dentro de la corrida, las dos ejecuciones de mayor costo fueron:
+
+**Evaluar conceptualización de muestreo aleatorio**
+
+- Costo total: **USD 0.0052**
+- Input: **USD 0.0034**
+- Output: **USD 0.0017**
+
+**Evaluar conceptualización de regresión**
+
+- Costo total: **USD 0.0040**
+- Input: **USD 0.0026**
+- Output: **USD 0.0014**
+
+El detalle de estas ejecuciones se encuentra en las trazas JSON correspondientes dentro de:
+
+```text
+traces/
+```
+
+---
+
+# Latencia y p95
+
+El análisis de latencia se realizó sobre las cinco ejecuciones concurrentes.
+
+La evidencia correspondiente se encuentra en:
+
+```text
+screenshots/trace_plot_latency.png
+screenshots/trace_plot_latency_values.png
+```
+
+Las capturas muestran la distribución de latencia de las ejecuciones y el cálculo del percentil 95.
+
+El **p95** permite observar una estimación de la latencia que no es superada por aproximadamente el 95 % de las solicitudes de la corrida analizada.
+
+---
+
+# Manejo de errores
+
+La API y el Worker cuentan con manejo de errores para evitar que una excepción durante una ejecución deje la tarea indefinidamente en estado `running`.
+
+Los errores de los proveedores LLM se clasifican mediante `errors.py`:
+
+```text
+RATE_LIMIT
+KEY
+UNKNOWN
+```
+
+El sistema también implementa fallback entre proveedores:
+
+```text
+OpenAI
+   ↓
+Anthropic
+   ↓
+Gemini
+```
+
+Si todos los proveedores disponibles fallan, la excepción se propaga al Worker, que actualiza el estado de la tarea a:
+
+```text
+FAILED
+```
+
+El error queda disponible mediante:
+
+```text
+GET /status/{job_id}
+```
+
+---
+
+# Requisitos
+
+Para ejecutar el proyecto se requiere:
+
+- Python 3.12+ según los requisitos de la entrega.
+- Redis.
+- Google Gemini API key.
+- Pinecone API key e índice.
+- Arize Phoenix.
+- Opcionalmente, claves de OpenAI y Anthropic para el fallback.
+
+Durante el desarrollo se utilizó Python 3.11.x debido a incompatibilidades de algunas dependencias del entorno de desarrollo.
+
+---
+
+# Instalación
+
+Crear el entorno virtual:
 
 ```bash
 python -m venv .venv
 ```
 
-### Activarlo en Windows
+En Windows:
 
 ```bash
 .venv\Scripts\activate
 ```
 
-### Activarlo en Linux/macOS
+En Linux/macOS:
 
 ```bash
 source .venv/bin/activate
 ```
 
-### Instalar las dependencias
+Instalar las dependencias:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Las dependencias del proyecto se encuentran documentadas en `requirements.txt`.
+---
 
-El directorio `.venv` no se incluye en el repositorio y se encuentra excluido mediante `.gitignore`.
+# Redis
 
-## Tecnologías utilizadas
+La aplicación utiliza:
+
+```text
+redis://localhost:6379
+```
+
+Si se utiliza un contenedor Docker previamente creado:
+
+```bash
+docker start redis
+```
+
+Para comprobar que Redis está disponible:
+
+```bash
+docker exec -it redis redis-cli ping
+```
+
+La respuesta esperada es:
+
+```text
+PONG
+```
+
+---
+
+# Variables de entorno
+
+Crear un archivo `.env` a partir de `.env.example`.
+
+Las variables utilizadas son:
+
+```text
+GOOGLE_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+PINECONE_API_KEY=
+INDEX_NAME=
+REDIS_URL=
+```
+
+Las claves reales no se incluyen en el repositorio.
+
+---
+
+# Ejecución
+
+## Phoenix
+
+Iniciar Arize Phoenix antes de ejecutar el Worker.
+
+La interfaz estará disponible en:
+
+```text
+http://localhost:6006
+```
+
+## API
+
+Iniciar FastAPI:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+La API estará disponible en:
+
+```text
+http://localhost:8000
+```
+
+La documentación interactiva puede consultarse en:
+
+```text
+http://localhost:8000/docs
+```
+
+## Worker
+
+En otra terminal:
+
+```bash
+python -m app.worker
+```
+
+Para ejecutar correctamente el sistema deben permanecer disponibles simultáneamente:
+
+```text
+Redis
+Phoenix
+FastAPI
+Worker
+```
+
+---
+
+# Ejemplo de ejecución Human-in-the-loop
+
+Una consulta utilizada para probar el flujo fue:
+
+```text
+Quiero que evalúes mi respuesta sobre la media:
+
+La media es el promedio de un conjunto de valores. Se calcula sumando
+todos los valores y dividiendo el resultado por la cantidad de valores.
+Por ejemplo, si cinco estudiantes obtienen 4, 5, 6, 7 y 8 en una prueba,
+la media es 6. La media sirve para conocer cuál es el valor que se
+encuentra en el centro de los datos.
+```
+
+El flujo produce inicialmente un estado:
+
+```text
+waiting_approval
+```
+
+Posteriormente se envió un rechazo con el siguiente feedback:
+
+```text
+Revisá la explicación y aclarale que la media no necesariamente coincide
+con el valor central de los datos ordenados. Agregá un ejemplo aplicado
+a una investigación psicológica con participantes humanos.
+```
+
+El evaluador vuelve a analizar la respuesta considerando el feedback recibido.
+
+Finalmente se envía una aprobación:
+
+```json
+{
+    "decision": "approve",
+    "feedback": ""
+}
+```
+
+y la tarea continúa hasta finalizar:
+
+```text
+DONE
+```
+
+---
+
+# Tecnologías utilizadas
 
 - Python
+- FastAPI
+- Uvicorn
 - asyncio
 - Pydantic
+- Redis
 - LangChain
 - LangChain Core
 - LangGraph
-- LangGraph Checkpoint SQLite
-- LangChain Google GenAI
-- LangChain OpenAI
-- LangChain Anthropic
+- LangGraph Checkpoint Redis
+- Google GenAI
+- OpenAI
+- Anthropic
 - Pinecone
 - Hugging Face
 - Sentence Transformers
 - scikit-learn
 - BM25
 - tiktoken
-- pytest
-- pytest-asyncio
-- Ruff
-- GitHub Actions
+- Arize Phoenix
+- OpenInference
+- OpenTelemetry
+- Pandas
+- Git
 
-## Variables de entorno
+---
 
-El proyecto utiliza las siguientes variables de entorno:
-
-* `GOOGLE_API_KEY`
-* `OPENAI_API_KEY`
-* `ANTHROPIC_API_KEY`
-* `PINECONE_API_KEY`
-* `INDEX_NAME`
-
-Crear un archivo `.env` a partir de `.env.example` y completar las variables correspondientes, en caso de no encontrarse configuradas como variables de entorno del sistema.
-
-Las claves reales no se incluyen en el repositorio.
-
-Las variables `OPENAI_API_KEY` y `ANTHROPIC_API_KEY` son opcionales. El sistema las contempla como proveedores alternativos dentro del mecanismo de fallback.
-
-## Arquitectura multi-agente
-
-El sistema utiliza una topología jerárquica con un Supervisor que coordina dos agentes especializados.
-
-```mermaid
-flowchart TD
-    U[Usuario] --> S[Supervisor]
-
-    S -->|Consulta conceptual| P[Agente Profesor]
-    S -->|Evaluación de respuesta| E[Agente Evaluador]
-
-    P --> TC[buscar_concepto]
-    P --> TF[buscar_fuente]
-
-    E --> TE[evaluar_concepto]
-    E --> TC
-    E --> TF
-
-    P --> S
-    E --> S
-
-    S -->|Tarea completa| SY[Síntesis]
-    SY --> F[Respuesta final]
-```
-
-Link original: https://mermaid.ai/d/ceb57e80-26df-478b-9dfe-8df3c492eb0b
-
-El flujo general es:
+# Estructura del proyecto
 
 ```text
-                    ┌─────────────────┐
-                    │     Usuario     │
-                    └────────┬────────┘
-                             │
-                             ▼
-                    ┌─────────────────┐
-                    │   Supervisor    │
-                    └───────┬─────────┘
-                            / \
-                           /   \
-                          ▼     ▼
-                ┌────────────┐ ┌─────────────┐
-                │  Profesor  │ │  Evaluador  │
-                └─────┬──────┘ └──────┬──────┘
-                      │                │
-                      └───────┬────────┘
-                              ▼
-                       ┌─────────────┐
-                       │ Supervisor  │
-                       └──────┬──────┘
-                              │
-                         FINISH
-                              │
-                              ▼
-                       ┌─────────────┐
-                       │  Síntesis   │
-                       └──────┬──────┘
-                              │
-                              ▼
-                       Respuesta final
-```
-
-La elección de esta topología permite separar las responsabilidades de búsqueda y análisis y centralizar la coordinación en el Supervisor.
-
-## Estado compartido
-
-El grafo utiliza `AgentState`, definido en `schemas.py`, como estado compartido.
-
-`AgentState` hereda de `MessagesState` y agrega información específica del workflow:
-
-* `next_agent`: próximo agente seleccionado por el Supervisor.
-* `contribuciones`: aportes generados por los agentes.
-* `pasos`: cantidad de pasos ejecutados.
-* `task_completed`: indica si el Supervisor determinó que la tarea está completa.
-
-Las contribuciones se acumulan mediante un reducer basado en `operator.add`.
-
-Este estado permite que los distintos nodos del grafo compartan información sin depender de variables globales.
-
-## Supervisor
-
-El Supervisor utiliza un modelo con salida estructurada mediante `DecisionSupervisor`.
-
-```python
-class DecisionSupervisor(BaseModel):
-    next: Literal["profesor", "evaluador", "FINISH"]
-    razon: str
-```
-
-El Supervisor puede seleccionar:
-
-* `profesor` para consultas conceptuales.
-* `evaluador` cuando el usuario proporciona una respuesta que debe ser evaluada.
-* `FINISH` cuando la tarea ya fue resuelta.
-
-Después de cada intervención de un especialista, el Supervisor vuelve a evaluar el estado de la tarea.
-
-El sistema también establece:
-
-```python
-MAX_PASOS = 6
-```
-
-Si se alcanza este límite, el Supervisor finaliza el workflow para evitar ciclos indefinidos.
-
-## Agente Profesor
-
-El `agente_profesor` está especializado en búsqueda e investigación de información conceptual.
-
-Utiliza `create_agent()` de LangChain y dispone de dos herramientas:
-
-### `buscar_concepto`
-
-Recupera fragmentos relevantes de la base documental mediante el retriever híbrido.
-
-Se utiliza para responder preguntas como:
-
-```text
-¿Qué es la correlación?
-¿Qué es la regresión?
-¿Qué significa validez interna?
-```
-
-### `buscar_fuente`
-
-Recupera las fuentes y páginas asociadas con un tema.
-
-Se utiliza cuando el usuario solicita información bibliográfica o desea saber dónde estudiar un concepto.
-
-El agente tiene instrucciones para utilizar una herramienta por vez y esperar el resultado antes de solicitar otra.
-
-## Agente Evaluador
-
-El `agente_evaluador` está especializado en el análisis de respuestas de estudiantes.
-
-Su herramienta principal es `evaluar_concepto`.
-
-El proceso implementado por esta herramienta es:
-
-```text
-Respuesta del usuario
-        ↓
-Recuperación de documentos
-        ↓
-Embedding de la respuesta
-        ↓
-Embeddings de los documentos
-        ↓
-Similitud del coseno
-        ↓
-Valor de similitud
-        ↓
-Clasificación
-```
-
-Los umbrales utilizados son:
-
-```text
-< 0.55       → Mal
-0.55 - <0.70 → Incompleta
-0.70 - <0.90 → Bien
-≥ 0.90       → Muy bien
-```
-
-La evaluación es una heurística basada en similitud semántica y no constituye una métrica empíricamente calibrada del conocimiento del estudiante.
-
-Además de `evaluar_concepto`, el agente puede utilizar:
-
-* `buscar_fuente`
-* `buscar_concepto`
-
-Estas herramientas permiten complementar la evaluación con información conceptual y bibliográfica.
-
-La respuesta final del agente comienza siempre indicando explícitamente la categoría obtenida mediante `evaluar_concepto`.
-
-## Herramientas y recuperación híbrida
-
-El sistema utiliza tres herramientas principales:
-
-* `buscar_concepto`
-* `buscar_fuente`
-* `evaluar_concepto`
-
-La recuperación documental utiliza un retriever híbrido compuesto por:
-
-* `BM25Retriever`
-* búsqueda vectorial sobre Pinecone
-
-Los resultados se combinan mediante `EnsembleRetriever`.
-
-La configuración utilizada asigna mayor peso a la recuperación vectorial:
-
-```text
-BM25       → 0.25
-Vectorial  → 0.75
-```
-
-Ambos retrievers utilizan `k = 5`.
-
-La recuperación híbrida permite combinar coincidencia léxica con similitud semántica.
-
-## Síntesis
-
-Cuando el Supervisor selecciona `FINISH`, el grafo continúa hacia `nodo_sintesis`.
-
-El nodo de síntesis recibe:
-
-* la pregunta original;
-* las contribuciones realizadas por los agentes.
-
-A partir de esa información genera una respuesta final para el usuario.
-
-La síntesis permite separar la coordinación de los agentes de la generación de la respuesta final y evita que el usuario deba recibir directamente la salida interna del workflow.
-
-El nodo de síntesis no expone la arquitectura interna ni el proceso de coordinación al usuario.
-
-## Fallback de proveedores LLM
-
-Los nodos principales utilizan un mecanismo de fallback entre proveedores:
-
-```text
-OpenAI
-   ↓ si falla
-Anthropic
-   ↓ si falla
-Gemini
-```
-
-El mecanismo se implementa en los nodos del Supervisor, Profesor, Evaluador y Síntesis.
-
-Cuando un proveedor genera una excepción, el error es clasificado y registrado y se intenta utilizar el siguiente proveedor disponible.
-
-Esto permite continuar la ejecución cuando un proveedor presenta problemas de credenciales, cuota o disponibilidad.
-
-## Memoria persistente
-
-La memoria del sistema se implementa mediante `AsyncSqliteSaver`.
-
-El estado de cada conversación se identifica mediante un `thread_id`.
-
-Por ejemplo:
-
-```python
-CONFIG = {
-    "configurable": {
-        "thread_id": "multiagente-1_evaluador_mal"
-    },
-    "recursion_limit": 10,
-}
-```
-
-El mismo `thread_id` permite recuperar el estado persistido de una conversación en interacciones posteriores.
-
-La persistencia se almacena localmente mediante SQLite.
-
-El sistema utiliza además un `recursion_limit` para establecer un límite de seguridad sobre la ejecución del grafo.
-
-## Manejo de errores
-
-Se implementó una clasificación de errores mediante `LLMErrorType` y la excepción personalizada `LLMError`.
-
-Actualmente se contemplan:
-
-* `KEY`: credenciales inválidas o no autorizadas.
-* `RATE_LIMIT`: límite de solicitudes o cuota alcanzada.
-* `UNKNOWN`: error no contemplado específicamente.
-
-Los errores se clasifican antes de ser registrados para evitar exponer información sensible del proveedor en los logs.
-
-Las herramientas también clasifican los errores producidos durante la recuperación documental o el cálculo de la evaluación.
-
-## Logging
-
-Se incorporó el módulo estándar `logging` de Python para registrar eventos relevantes durante la ejecución.
-
-Los mensajes se clasifican según su nivel:
-
-* `INFO`: proveedores utilizados, ejecución de herramientas y eventos normales.
-* `WARNING`: errores recuperables de proveedores.
-* `ERROR`: errores que impiden completar una operación.
-
-Los logs permiten observar el flujo de ejecución y facilitar la identificación de errores sin registrar claves de API.
-
-## Testing
-
-Se incorporaron pruebas automatizadas utilizando `pytest` y `pytest-asyncio`.
-
-Las pruebas se diseñaron para verificar los componentes principales del sistema sin depender de llamadas reales a los proveedores LLM cuando no es necesario.
-
-Se incluyen pruebas para:
-
-* Decisiones del Supervisor.
-* Límite máximo de pasos del Supervisor.
-* Fallback entre proveedores.
-* Ejecución del agente Profesor.
-* Ejecución del agente Evaluador.
-* Ejecución del nodo de Síntesis.
-* Clasificación de resultados de `evaluar_concepto`.
-* Clasificación de errores de las herramientas.
-* Funcionamiento del grafo completo.
-* Flujo Profesor → Supervisor → Síntesis.
-* Flujo Evaluador → Supervisor → Síntesis.
-* Persistencia de memoria entre diferentes turnos.
-* Serialización de mensajes y llamadas a herramientas.
-* Guardado de trazas independientes.
-
-Las llamadas a agentes y proveedores LLM se simulan mediante *mocking* cuando la prueba busca verificar exclusivamente la lógica del nodo o del grafo.
-
-### Ejecución de los tests
-
-Los tests pueden ejecutarse mediante:
-
-```bash
-pytest -v
-```
-
-El proyecto también cuenta con un workflow de GitHub Actions que ejecuta automáticamente los tests ante nuevos `push` y `pull_request`.
-
-El workflow instala las dependencias mediante `requirements.txt` y ejecuta:
-
-```bash
-pytest tests/ --ignore=tests/integration
-```
-
-Las credenciales necesarias para la infraestructura de Pinecone y los proveedores LLM se configuran mediante GitHub Secrets.
-
-## Trazas de ejecución
-
-El proyecto genera trazas de las ejecuciones en formato JSON.
-
-Las trazas permiten observar:
-
-* mensajes del usuario;
-* respuestas de los agentes;
-* llamadas a herramientas;
-* resultados de herramientas;
-* participación del Supervisor;
-* secuencia de ejecución.
-
-Un flujo típico puede representarse como:
-
-```text
-HumanMessage
-      ↓
-Supervisor
-      ↓
-AIMessage
-      ↓
-Tool Call
-      ↓
-ToolMessage
-      ↓
-AIMessage
-      ↓
-Supervisor
-      ↓
-Síntesis
-      ↓
-Respuesta final
-```
-
-Las trazas incluidas en el directorio `traces/` corresponden a ejecuciones reales del sistema.
-
-La traza representa el ciclo de ejecución observable del agente; no contiene ni pretende representar razonamientos internos no expuestos por el modelo.
-
-## Ejecución
-
-El script principal permite ejecutar el orquestador.
-
-Para ejecutar el sistema:
-
-```bash
-python main.py
-```
-
-Durante la ejecución, el sistema:
-
-1. Recibe la consulta del usuario.
-2. Inicializa o recupera el estado asociado al `thread_id`.
-3. Ejecuta el Supervisor.
-4. El Supervisor selecciona un agente especializado.
-5. El agente utiliza las herramientas disponibles cuando resulta necesario.
-6. El resultado del agente se incorpora al estado compartido.
-7. El Supervisor vuelve a evaluar la tarea.
-8. Cuando la tarea está completa, se ejecuta el nodo de síntesis.
-9. Se genera la respuesta final.
-10. Se guarda la traza de ejecución.
-
-## Estructura del proyecto
-
-```text
-├── agents/
+├── app/
 │   ├── __init__.py
-│   ├── supervisor.py
-│   ├── profesor.py
-│   ├── evaluador.py
-│   └── sintesis.py
-│
-├── tests/
-│   ├── test_supervisor.py
-│   ├── test_profesor.py
-│   ├── test_evaluador.py
-│   ├── test_sintesis.py
-│   ├── test_graph.py
-│   ├── test_tools.py
-│   └── test_memory.py
-│
+│   ├── chunking.py
+│   ├── db_config.py
+│   ├── db_ingest.py
+│   ├── errors.py
+│   ├── main.py
+│   ├── models.py
+│   ├── worker.py
+│   ├── graph_config.py
+│   ├── schemas.py
+│   ├── errors.py
+│   ├── logging_config.py
+│   ├── trace_utils.py
+│   ├── hitl.py
+│   ├── observability.py
+│   ├── retriever.py
+│   ├── redis.py
+│   ├── setup.py
+│   ├── tools.py
+│   └── agents/
+│       ├── profesor.py
+│       ├── evaluador.py
+│       ├── supervisor.py
+│       └── sintesis.py
+├── data/
 ├── traces/
-│   ├── multiagente-1_evaluador_incompleta.json
-│   └── multiagente-1_profesor.json
-│
-├── chunking.py               # Limpieza y división de documentos
-├── graph_config.py           # Construcción y conexión del StateGraph
-├── schemas.py                # Estado compartido y modelos estructurados
-├── db_config.py              # Configuración de embeddings y Pinecone
-├── db_ingest.py              # Ingesta y configuración de infraestructura RAG
-├── retriever.py              # Configuración del retriever híbrido
-├── tools.py                  # Herramientas disponibles para los agentes
-├── models.py                 # Configuración de proveedores LLM
-├── errors.py                 # Clasificación y manejo de errores
-├── logging_config.py         # Configuración del sistema de logs
-├── trace_utils.py            # Serialización y guardado de trazas
-├── main.py                   # Punto de entrada y ejecución
-├── setup.py                  # Procesamiento de documentos
-├── .env.example              # Ejemplo de variables de entorno
+│   └── *.json
+├── screenshots/
+│   ├── [capturas de trazas]
+│   ├── trace_plot_cost.png
+│   ├── trace_plot_latency.png
+│   └── trace_plot_latency_values.png
+├── .env.example
 ├── .gitignore
-├── pytest.ini
 ├── requirements.txt
 └── README.md
 ```
 
-Los archivos SQLite utilizados para los checkpoints y otros archivos generados durante la ejecución se almacenan localmente y se encuentran excluidos del repositorio mediante `.gitignore`.
+---
 
-## Calidad y buenas prácticas
+# Calidad y decisiones de diseño
 
-El proyecto utiliza Ruff como herramienta de análisis y formateo del código.
+El proyecto incorpora las siguientes decisiones orientadas a una implementación más cercana a producción:
 
-Para formatear automáticamente el proyecto:
+- Uso de `async/await` para las operaciones de I/O.
+- Separación entre API y Worker.
+- Redis como mecanismo de desacoplamiento entre recepción y procesamiento.
+- Persistencia del estado de las tareas.
+- Estado explícito `FAILED` para errores de ejecución.
+- Pydantic para validación de las solicitudes.
+- `AgentState` para el estado compartido del grafo.
+- Checkpoints persistentes mediante Redis.
+- Human-in-the-loop mediante los mecanismos nativos de LangGraph.
+- Variables de entorno para credenciales y configuración.
+- Logging.
+- Instrumentación mediante OpenTelemetry/OpenInference.
+- Observabilidad con Arize Phoenix.
+- Persistencia de trazas detalladas en JSON.
+- Métricas de costo y latencia obtenidas sobre ejecuciones concurrentes.
 
-```bash
-ruff format .
-```
+Una decisión central de la arquitectura es evitar que el endpoint HTTP ejecute directamente las tareas pesadas del sistema multi-agente. FastAPI recibe y encola la tarea, mientras que el Worker se ocupa de ejecutar el grafo.
 
-Para analizar el código sin modificarlo:
+---
 
-```bash
-ruff check .
-```
+# Sobre el código
 
-También se utilizan:
-
-* Type Hints.
-* Pydantic para modelos estructurados.
-* Funciones asíncronas mediante `async def`.
-* `await` para operaciones asíncronas.
-* Excepciones personalizadas.
-* *Mocking* en pruebas unitarias.
-* Variables de entorno para las credenciales.
-* Estado compartido mediante `AgentState`.
-* Salidas estructuradas para las decisiones del Supervisor.
-* `recursion_limit` y `MAX_PASOS` para limitar ciclos.
-* Persistencia mediante SQLite.
-* GitHub Actions para integración continua.
-
-## Sobre el código
-
-El proyecto fue desarrollado tomando como referencia:
-
-* Código y ejemplos proporcionados por el profesor como guía para la Pre-Entrega 6.
-* Ejemplos y contenidos incluidos en el temario de la plataforma sobre agentes, LangGraph, herramientas, RAG y sistemas multi-agente.
-* Documentación oficial y recursos disponibles en Internet.
-* ChatGPT como herramienta de asistencia durante el desarrollo.
+El desarrollo se realizó tomando como referencia los ejemplos y materiales proporcionados durante el curso, documentación oficial de las herramientas utilizadas, recursos disponibles en Internet y asistencia de ChatGPT para resolver dudas conceptuales, revisar implementaciones y depurar distintos problemas durante el desarrollo.
