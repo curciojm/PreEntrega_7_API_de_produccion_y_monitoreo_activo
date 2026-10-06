@@ -53,7 +53,7 @@ La aplicación utiliza:
 - **Human-in-the-loop** mediante `interrupt()` y `Command(resume=...)`.
 - **Arize Phoenix + OpenInference** para observabilidad.
 - **Trazas JSON** para conservar el detalle de las ejecuciones.
-- Manejo de errores de ejecución y actualización del estado de las tareas a `FAILED`.
+- Manejo de errores de ejecución y actualización del estado de las tareas a `failed`.
 
 ---
 
@@ -119,7 +119,7 @@ FastAPI
            Síntesis
               │
               ▼
-             DONE
+          completed
 ```
 
 El endpoint no permanece esperando a que termine el procesamiento multi-agente. Devuelve inmediatamente el `job_id`, que posteriormente puede utilizarse para consultar el estado de la tarea.
@@ -163,7 +163,7 @@ Evaluador
                                Síntesis
                                   │
                                   ▼
-                                 DONE
+                              completed
 ```
 
 El flujo utiliza `interrupt()` para pausar la ejecución del grafo y `Command(resume=...)` para continuarla una vez recibida la decisión humana.
@@ -190,11 +190,11 @@ El endpoint:
 3. Agrega el `job_id` a la cola `multiagent_tasks`.
 4. Devuelve inmediatamente el identificador de la tarea.
 
-Ejemplo conceptual:
+Ejemplo:
 
 ```json
 {
-    "query": "Quiero que evalúes mi respuesta sobre la media..."
+  "query": "Quiero que evalúes mi respuesta sobre la correlación..."
 }
 ```
 
@@ -202,8 +202,8 @@ Respuesta:
 
 ```json
 {
-    "job_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "status": "pending"
+  "job_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "status": "pending"
 }
 ```
 
@@ -217,9 +217,9 @@ Los principales estados utilizados son:
 
 ```text
 pending
-running
+processing
 waiting_approval
-done
+completed
 failed
 ```
 
@@ -241,8 +241,8 @@ Ejemplo de aprobación:
 
 ```json
 {
-    "decision": "approve",
-    "feedback": ""
+  "decision": "approve",
+  "feedback": ""
 }
 ```
 
@@ -250,8 +250,8 @@ Ejemplo de rechazo:
 
 ```json
 {
-    "decision": "reject",
-    "feedback": "Revisá la explicación y agregá un ejemplo aplicado a una investigación sobre comportamiento humano."
+  "decision": "reject",
+  "feedback": "Revisá la explicación y agregá un ejemplo aplicado a una investigación sobre comportamiento humano."
 }
 ```
 
@@ -312,11 +312,11 @@ El estado contiene información como:
 
 ```json
 {
-    "job_id": "...",
-    "query": "...",
-    "status": "running",
-    "result": null,
-    "error": null
+  "job_id": "...",
+  "query": "...",
+  "status": "processing",
+  "result": null,
+  "error": null
 }
 ```
 
@@ -326,7 +326,7 @@ Si ocurre una excepción durante la ejecución en segundo plano, el Worker actua
 failed
 ```
 
-Esto evita que una tarea quede indefinidamente en estado `running`.
+Esto evita que una tarea quede indefinidamente en estado `processing`.
 
 ## Colas
 
@@ -364,14 +364,14 @@ Redis Queue
     ▼
 Worker
     │
-    ├── status = RUNNING
+    ├── status = processing
     │
     ▼
 LangGraph
     │
-    ├── WAITING_APPROVAL
+    ├── waiting_approval
     │
-    └── DONE
+    └── completed
 ```
 
 Si ocurre una excepción durante el procesamiento:
@@ -380,7 +380,7 @@ Si ocurre una excepción durante el procesamiento:
 Exception
     │
     ▼
-status = FAILED
+status = failed
 ```
 
 Los errores quedan registrados y pueden consultarse mediante el endpoint de estado.
@@ -496,9 +496,10 @@ Cuando el usuario rechaza la evaluación, el feedback se incorpora a la siguient
 Por ejemplo:
 
 ```text
-"Revisá la explicación y aclarale que la media no necesariamente
-coincide con el valor central de los datos ordenados. Agregá un
-ejemplo aplicado a una investigación sobre comportamiento humano."
+"Revisá la explicación y aclarale que una correlación cercana a cero
+indica ausencia de relación lineal, pero no necesariamente ausencia
+de cualquier tipo de relación entre las variables. Agregá un ejemplo
+aplicado a una investigación sobre comportamiento humano."
 ```
 
 El evaluador vuelve a utilizar sus herramientas y realiza una nueva evaluación considerando la revisión humana.
@@ -519,9 +520,9 @@ Cada evento contiene información como:
 
 ```json
 {
-    "tipo": "HumanApproval",
-    "decision": "reject",
-    "feedback": "..."
+  "tipo": "HumanApproval",
+  "decision": "reject",
+  "feedback": "..."
 }
 ```
 
@@ -621,7 +622,7 @@ Resume con aprobación
 Síntesis
       │
       ▼
-DONE
+completed
 ```
 
 ---
@@ -708,7 +709,7 @@ El **p95** permite observar una estimación de la latencia que no es superada po
 
 # Manejo de errores
 
-La API y el Worker cuentan con manejo de errores para evitar que una excepción durante una ejecución deje la tarea indefinidamente en estado `running`.
+La API y el Worker cuentan con manejo de errores para evitar que una excepción durante una ejecución deje la tarea indefinidamente en estado `processing`.
 
 Los errores de los proveedores LLM se clasifican mediante `errors.py`:
 
@@ -731,7 +732,7 @@ Gemini
 Si todos los proveedores disponibles fallan, la excepción se propaga al Worker, que actualiza el estado de la tarea a:
 
 ```text
-FAILED
+failed
 ```
 
 El error queda disponible mediante:
@@ -746,7 +747,7 @@ GET /status/{job_id}
 
 El proyecto incluye tests unitarios para verificar componentes críticos de la API y del Worker.
 
-Los tests utilizan **mocking** para aislar las dependencias externas, por lo que no requieren ejecutar Redis, proveedores LLM ni Pinecone durante su ejecución.
+Los tests utilizan **mocking** para aislar las dependencias externas durante la ejecución de los casos de prueba.
 
 Actualmente se cubren dos casos principales:
 
@@ -767,12 +768,6 @@ Para ejecutar todos los tests:
 pytest tests/ -v
 ```
 
-La ejecución esperada es:
-
-```text
-2 passed
-```
-
 También se puede ejecutar cada archivo individualmente:
 
 ```bash
@@ -783,7 +778,9 @@ pytest tests/test_api.py -v
 pytest tests/test_worker.py -v
 ```
 
-Los tests son unitarios y utilizan mocks para evitar dependencias de servicios externos.
+Los tests utilizan mocks para aislar las operaciones que se prueban. Sin embargo, el módulo del Worker importa el grafo de la aplicación y, durante la inicialización de sus dependencias, se requiere la configuración de Pinecone utilizada por el proyecto.
+
+Por este motivo, el entorno de ejecución de los tests debe contar con las variables de entorno necesarias para la inicialización de la aplicación.
 
 ---
 
@@ -791,7 +788,7 @@ Los tests son unitarios y utilizan mocks para evitar dependencias de servicios e
 
 Para ejecutar el proyecto se requiere:
 
-- Python 3.12+ según los requisitos de la entrega.
+- Python 3.11.x.
 - Redis.
 - Google Gemini API key.
 - Pinecone API key e índice.
@@ -874,6 +871,12 @@ INDEX_NAME=
 
 Las claves reales no se incluyen en el repositorio.
 
+Redis no requiere una variable de entorno en la configuración actual, ya que la aplicación utiliza:
+
+```text
+redis://localhost:6379
+```
+
 ---
 
 # Ejecución
@@ -927,18 +930,83 @@ Worker
 
 ---
 
+# Cómo lanzar las peticiones
+
+La forma más sencilla de probar la API es utilizar la documentación interactiva de FastAPI disponible en:
+
+```text
+http://localhost:8000/docs
+```
+
+Desde allí se puede ejecutar `POST /process` utilizando un cuerpo como:
+
+```json
+{
+  "query": "Quiero que evalúes mi respuesta sobre la correlación: la correlación indica si dos variables están relacionadas."
+}
+```
+
+La API devuelve un `job_id`:
+
+```json
+{
+  "job_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "status": "pending"
+}
+```
+
+Con ese identificador se puede consultar el estado mediante:
+
+```text
+GET /status/{job_id}
+```
+
+Si la tarea requiere intervención humana, el estado será:
+
+```text
+waiting_approval
+```
+
+En ese momento se puede utilizar:
+
+```text
+POST /approve/{job_id}
+```
+
+con un cuerpo como:
+
+```json
+{
+  "decision": "approve",
+  "feedback": ""
+}
+```
+
+o, para solicitar una revisión:
+
+```json
+{
+  "decision": "reject",
+  "feedback": "Revisá la explicación y aclarale que una correlación cercana a cero indica ausencia de relación lineal."
+}
+```
+
+El Worker recuperará la decisión desde Redis y continuará la ejecución del grafo.
+
+---
+
 # Ejemplo de ejecución Human-in-the-loop
 
 Una consulta utilizada para probar el flujo fue:
 
 ```text
-Quiero que evalúes mi respuesta sobre la media:
+Quiero que evalúes mi respuesta sobre la correlación:
 
-La media es el promedio de un conjunto de valores. Se calcula sumando
-todos los valores y dividiendo el resultado por la cantidad de valores.
-Por ejemplo, si cinco estudiantes obtienen 4, 5, 6, 7 y 8 en una prueba,
-la media es 6. La media sirve para conocer cuál es el valor que se
-encuentra en el centro de los datos.
+La correlación es una medida que permite conocer si dos variables están
+relacionadas. Si la correlación es positiva, cuando una variable aumenta
+la otra también tiende a aumentar. Si es negativa, cuando una aumenta
+la otra tiende a disminuir. Una correlación cercana a cero indica que
+no existe relación entre las variables.
 ```
 
 El flujo produce inicialmente un estado:
@@ -950,9 +1018,10 @@ waiting_approval
 Posteriormente se envió un rechazo con el siguiente feedback:
 
 ```text
-Revisá la explicación y aclarale que la media no necesariamente coincide
-con el valor central de los datos ordenados. Agregá un ejemplo aplicado
-a una investigación sobre comportamiento humano.
+Revisá la explicación y aclarale que una correlación cercana a cero
+indica ausencia de relación lineal, pero no necesariamente ausencia
+de cualquier tipo de relación entre las variables. Agregá un ejemplo
+aplicado a una investigación sobre comportamiento humano.
 ```
 
 El evaluador vuelve a analizar la respuesta considerando el feedback recibido.
@@ -961,15 +1030,15 @@ Finalmente se envía una aprobación:
 
 ```json
 {
-    "decision": "approve",
-    "feedback": ""
+  "decision": "approve",
+  "feedback": ""
 }
 ```
 
 y la tarea continúa hasta finalizar:
 
 ```text
-DONE
+completed
 ```
 
 ---
@@ -988,91 +1057,4 @@ DONE
 - LangGraph Checkpoint Redis
 - Google GenAI
 - OpenAI
-- Anthropic
-- Pinecone
-- Hugging Face
-- Sentence Transformers
-- scikit-learn
-- BM25
-- tiktoken
-- Arize Phoenix
-- OpenInference
-- OpenTelemetry
-- Git
-
----
-
-# Estructura del proyecto
-
-```text
-├── app/
-│   ├── __init__.py
-│   ├── chunking.py
-│   ├── db_config.py
-│   ├── db_ingest.py
-│   ├── errors.py
-│   ├── main.py
-│   ├── models.py
-│   ├── worker.py
-│   ├── graph_config.py
-│   ├── schemas.py
-│   ├── logging_config.py
-│   ├── trace_utils.py
-│   ├── hitl.py
-│   ├── observability.py
-│   ├── retriever.py
-│   ├── redis.py
-│   ├── setup.py
-│   ├── tools.py
-│   └── agents/
-│       ├── profesor.py
-│       ├── evaluador.py
-│       ├── supervisor.py
-│       └── sintesis.py
-├── data/
-├── tests/
-│   ├── test_api.py
-│   └── test_worker.py
-├── traces/
-│   └── *.json
-├── screenshots/
-│   ├── *.png
-│   ├── trace_plot_cost.png
-│   ├── trace_plot_latency.png
-│   └── trace_plot_latency_values.png
-├── .env.example
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
-
----
-
-# Calidad y decisiones de diseño
-
-El proyecto incorpora las siguientes decisiones orientadas a una implementación más cercana a producción:
-
-- Uso de `async/await` para las operaciones de I/O.
-- Separación entre API y Worker.
-- Redis como mecanismo de desacoplamiento entre recepción y procesamiento.
-- Persistencia del estado de las tareas.
-- Estado explícito `FAILED` para errores de ejecución.
-- Pydantic para validación de las solicitudes.
-- `AgentState` para el estado compartido del grafo.
-- Checkpoints persistentes mediante Redis.
-- Human-in-the-loop mediante los mecanismos nativos de LangGraph.
-- Variables de entorno para credenciales y configuración.
-- Logging.
-- Instrumentación mediante OpenTelemetry/OpenInference.
-- Observabilidad con Arize Phoenix.
-- Persistencia de trazas detalladas en JSON.
-- Métricas de costo y latencia obtenidas sobre ejecuciones concurrentes.
-- Tests unitarios con mocking para aislar dependencias externas.
-
-Una decisión central de la arquitectura es evitar que el endpoint HTTP ejecute directamente las tareas pesadas del sistema multi-agente. FastAPI recibe y encola la tarea, mientras que el Worker se ocupa de ejecutar el grafo.
-
----
-
-# Sobre el código
-
-El desarrollo se realizó tomando como referencia los ejemplos y materiales proporcionados durante el curso, documentación oficial de las herramientas utilizadas, recursos disponibles en Internet y asistencia de ChatGPT para resolver dudas conceptuales, revisar implementaciones y depurar distintos problemas durante el desarrollo.
+-
