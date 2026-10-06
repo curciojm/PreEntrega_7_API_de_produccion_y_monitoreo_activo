@@ -870,7 +870,6 @@ OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 PINECONE_API_KEY=
 INDEX_NAME=
-REDIS_URL=
 ```
 
 Las claves reales no se incluyen en el repositorio.
@@ -953,7 +952,7 @@ Posteriormente se envió un rechazo con el siguiente feedback:
 ```text
 Revisá la explicación y aclarale que la media no necesariamente coincide
 con el valor central de los datos ordenados. Agregá un ejemplo aplicado
-a una investigación psicológica con participantes humanos.
+a una investigación sobre comportamiento humano.
 ```
 
 El evaluador vuelve a analizar la respuesta considerando el feedback recibido.
@@ -1037,7 +1036,7 @@ DONE
 ├── traces/
 │   └── *.json
 ├── screenshots/
-│   ├── [capturas de trazas]
+│   ├── *.png
 │   ├── trace_plot_cost.png
 │   ├── trace_plot_latency.png
 │   └── trace_plot_latency_values.png
