@@ -1057,4 +1057,93 @@ completed
 - LangGraph Checkpoint Redis
 - Google GenAI
 - OpenAI
--
+- Anthropic
+- Pinecone
+- Hugging Face
+- Sentence Transformers
+- scikit-learn
+- Pandas
+- BM25
+- tiktoken
+- Arize Phoenix
+- OpenInference
+- OpenTelemetry
+- pytest
+- Git
+
+---
+
+# Estructura del proyecto
+
+```text
+├── app/
+│   ├── __init__.py
+│   ├── chunking.py
+│   ├── db_config.py
+│   ├── db_ingest.py
+│   ├── errors.py
+│   ├── main.py
+│   ├── models.py
+│   ├── worker.py
+│   ├── graph_config.py
+│   ├── schemas.py
+│   ├── logging_config.py
+│   ├── trace_utils.py
+│   ├── hitl.py
+│   ├── observability.py
+│   ├── retriever.py
+│   ├── redis.py
+│   ├── setup.py
+│   ├── tools.py
+│   └── agents/
+│       ├── profesor.py
+│       ├── evaluador.py
+│       ├── supervisor.py
+│       └── sintesis.py
+├── data/
+├── tests/
+│   ├── test_api.py
+│   └── test_worker.py
+├── traces/
+│   └── *.json
+├── screenshots/
+│   ├── *.png
+│   ├── trace_plot_cost.png
+│   ├── trace_plot_latency.png
+│   └── trace_plot_latency_values.png
+├── .env.example
+├── .gitignore
+├── requirements.txt
+└── README.md
+```
+
+---
+
+# Calidad y decisiones de diseño
+
+El proyecto incorpora las siguientes decisiones orientadas a una implementación más cercana a producción:
+
+- Uso de `async/await` para las operaciones de I/O.
+- Separación entre API y Worker.
+- Redis como mecanismo de desacoplamiento entre recepción y procesamiento.
+- Persistencia del estado de las tareas.
+- Estado explícito `failed` para errores de ejecución.
+- Pydantic para validación de las solicitudes.
+- `AgentState` para el estado compartido del grafo.
+- Checkpoints persistentes mediante Redis.
+- Human-in-the-loop mediante los mecanismos nativos de LangGraph.
+- Variables de entorno para credenciales y configuración.
+- Logging.
+- Instrumentación mediante OpenTelemetry/OpenInference.
+- Observabilidad con Arize Phoenix.
+- Persistencia de trazas detalladas en JSON.
+- Métricas de costo y latencia obtenidas sobre ejecuciones concurrentes.
+- Tests unitarios con mocking para aislar dependencias externas.
+
+Una decisión central de la arquitectura es evitar que el endpoint HTTP ejecute directamente las tareas pesadas del sistema multi-agente. FastAPI recibe y encola la tarea, mientras que el Worker se ocupa de ejecutar el grafo.
+
+---
+
+# Sobre el código
+
+El desarrollo se realizó tomando como referencia los ejemplos y materiales proporcionados durante el curso, documentación oficial de las herramientas utilizadas, recursos disponibles en Internet y asistencia de ChatGPT para resolver dudas conceptuales, revisar implementaciones y depurar distintos problemas durante el desarrollo.
