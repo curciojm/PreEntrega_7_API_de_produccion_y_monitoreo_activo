@@ -251,7 +251,7 @@ Ejemplo de rechazo:
 ```json
 {
     "decision": "reject",
-    "feedback": "Revisá la explicación y agregá un ejemplo aplicado a una investigación psicológica."
+    "feedback": "Revisá la explicación y agregá un ejemplo aplicado a una investigación sobre comportamiento humano."
 }
 ```
 
@@ -498,7 +498,7 @@ Por ejemplo:
 ```text
 "Revisá la explicación y aclarale que la media no necesariamente
 coincide con el valor central de los datos ordenados. Agregá un
-ejemplo aplicado a una investigación psicológica con participantes humanos."
+ejemplo aplicado a una investigación sobre comportamiento humano."
 ```
 
 El evaluador vuelve a utilizar sus herramientas y realiza una nueva evaluación considerando la revisión humana.
