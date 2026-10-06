@@ -287,7 +287,7 @@ FastAPI funciona como productor de tareas y el Worker como consumidor.
 
 La cola principal utiliza:
 
-```python
+```text
 RPUSH
 LPOP
 ```
@@ -665,7 +665,7 @@ screenshots/trace_plot_cost.png
 
 La captura permite comparar el costo correspondiente a las cinco ejecuciones solicitadas.
 
-### Trazas de mayor costo
+## Trazas de mayor costo
 
 Dentro de la corrida, las dos ejecuciones de mayor costo fueron:
 
@@ -739,6 +739,51 @@ El error queda disponible mediante:
 ```text
 GET /status/{job_id}
 ```
+
+---
+
+# Ejecución de tests
+
+El proyecto incluye tests unitarios para verificar componentes críticos de la API y del Worker.
+
+Los tests utilizan **mocking** para aislar las dependencias externas, por lo que no requieren ejecutar Redis, proveedores LLM ni Pinecone durante su ejecución.
+
+Actualmente se cubren dos casos principales:
+
+- **Creación de tareas mediante `POST /process`**: verifica la generación del `job_id`, el almacenamiento del estado inicial en Redis y la incorporación de la tarea a la cola `multiagent_tasks`.
+- **Manejo de errores del Worker**: verifica que una excepción durante la ejecución del grafo actualice correctamente el estado de la tarea a `failed` y almacene el error correspondiente.
+
+Los tests se encuentran en:
+
+```text
+tests/
+├── test_api.py
+└── test_worker.py
+```
+
+Para ejecutar todos los tests:
+
+```bash
+pytest tests/ -v
+```
+
+La ejecución esperada es:
+
+```text
+2 passed
+```
+
+También se puede ejecutar cada archivo individualmente:
+
+```bash
+pytest tests/test_api.py -v
+```
+
+```bash
+pytest tests/test_worker.py -v
+```
+
+Los tests son unitarios y utilizan mocks para evitar dependencias de servicios externos.
 
 ---
 
@@ -954,7 +999,6 @@ DONE
 - Arize Phoenix
 - OpenInference
 - OpenTelemetry
-- Pandas
 - Git
 
 ---
@@ -973,7 +1017,6 @@ DONE
 │   ├── worker.py
 │   ├── graph_config.py
 │   ├── schemas.py
-│   ├── errors.py
 │   ├── logging_config.py
 │   ├── trace_utils.py
 │   ├── hitl.py
@@ -988,6 +1031,9 @@ DONE
 │       ├── supervisor.py
 │       └── sintesis.py
 ├── data/
+├── tests/
+│   ├── test_api.py
+│   └── test_worker.py
 ├── traces/
 │   └── *.json
 ├── screenshots/
@@ -1022,6 +1068,7 @@ El proyecto incorpora las siguientes decisiones orientadas a una implementación
 - Observabilidad con Arize Phoenix.
 - Persistencia de trazas detalladas en JSON.
 - Métricas de costo y latencia obtenidas sobre ejecuciones concurrentes.
+- Tests unitarios con mocking para aislar dependencias externas.
 
 Una decisión central de la arquitectura es evitar que el endpoint HTTP ejecute directamente las tareas pesadas del sistema multi-agente. FastAPI recibe y encola la tarea, mientras que el Worker se ocupa de ejecutar el grafo.
 
